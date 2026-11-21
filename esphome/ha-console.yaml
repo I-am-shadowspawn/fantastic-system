@@ -1,7 +1,7 @@
 # =============================================================================
 # ESP32 HA Console - base template
 #
-# Turns a Waveshare ESP32-S3 touchscreen into an interactive dashboard /
+# Turns a Waveshare ESP32-P4-WIFI6-Touch-LCD-7B into an interactive dashboard /
 # console for Home Assistant. Everything talks to Home Assistant through the
 # single ESPHome (native API) integration - no MQTT, no extra add-ons.
 #
@@ -19,8 +19,8 @@ substitutions:
   idle_timeout: "60"
 
   # --- Home Assistant entities shown on the "Home" page -----------------------
-  tile_1_entity: light.living_room
-  tile_1_label: Living Room
+  tile_1_entity: light.fan_lamp_2
+  tile_1_label: Bedroom Light
   tile_2_entity: light.kitchen
   tile_2_label: Kitchen
   tile_3_entity: switch.coffee_machine
@@ -29,7 +29,7 @@ substitutions:
   tile_4_label: Bedroom
 
   # --- Home Assistant sensors shown on the "Sensors" page ---------------------
-  temperature_entity: sensor.living_room_temperature
+  temperature_entity: camera.hot_skink_cam_hd_stream
   humidity_entity: sensor.living_room_humidity
   outdoor_temperature_entity: sensor.outdoor_temperature
 
@@ -38,6 +38,6 @@ substitutions:
 
 packages:
   base: !include packages/base.yaml
-  hardware: !include packages/hardware/waveshare-esp32-s3-touch-lcd-4.3.yaml
+  hardware: !include packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
   homeassistant: !include packages/homeassistant.yaml
   ui: !include packages/ui.yaml
