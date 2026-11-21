@@ -3,7 +3,7 @@
 #   Sensors - live values imported from Home Assistant
 #   Console - buttons that fire the "Console Button" event in Home Assistant
 #
-# Widgets are sized for an 800x480 panel.
+# Widgets use a flexible layout for the 1024x600 panel.
 
 lvgl:
   displays:
