@@ -41,9 +41,10 @@ text_sensor:
     id: ha_message
     entity_id: ${message_entity}
     on_value:
-      - lvgl.label.update:
-          id: status_message
-          text: !lambda return x;
+      - lambda: |-
+          if constexpr (${ 'false' if show_build_timestamp | default(false) | lower == 'true' else 'true' }) {
+            lv_label_set_text(id(status_message), x.c_str());
+          }
 
 # --- Entities exposed to Home Assistant -------------------------------------
 

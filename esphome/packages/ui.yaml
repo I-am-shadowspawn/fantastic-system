@@ -14,6 +14,12 @@ esphome:
     priority: 300
     then:
       - lambda: |-
+          if constexpr (${ 'true' if show_build_timestamp | default(false) | lower == 'true' else 'false' }) {
+            char timestamp[Application::BUILD_TIME_STR_SIZE];
+            App.get_build_time_string(timestamp);
+            lv_label_set_text_fmt(id(status_message), "Build: %s", timestamp);
+          }
+
           const char *mapping = ${ (home_tiles if home_tiles is defined else [
               dict(entity=tile_1_entity, label=tile_1_label),
               dict(entity=tile_2_entity, label=tile_2_label),

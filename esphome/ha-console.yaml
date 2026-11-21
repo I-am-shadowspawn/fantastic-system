@@ -41,6 +41,8 @@ substitutions:
 
   # --- Optional message shown in the status bar (e.g. an input_text) ----------
   message_entity: input_text.ha_console_message
+  # Show the firmware build timestamp instead of the Home Assistant message.
+  show_build_timestamp: false
 
 # ESPHome downloads these packages when validating/building the configuration.
 # Replace ref with a release tag or commit SHA to pin a known version.
