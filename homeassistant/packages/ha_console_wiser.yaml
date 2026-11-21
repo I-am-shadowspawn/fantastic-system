@@ -1,0 +1,175 @@
+# Install in HA's packages directory (not ESPHome's). See esphome/README.md.
+script:
+  ha_console_wiser_snapshot:
+    alias: HA Console - Wiser snapshot
+    mode: parallel
+    max: 5
+    sequence:
+      - variables:
+          # Optional mappings keyed by HA hot water device ID. All referenced
+          # entities must belong to that same Wiser device. Useful after icon customization.
+          # DEVICE_ID: {boost_entity: button.example, cancel_entity: button.example,
+          #             status_entity: switch.example}
+          hot_water_overrides: {}
+          snapshot: >-
+            {%- set wiser = integration_entities('wiser') | list -%}
+            {%- set ns = namespace(rooms=[], water=[], devices=[]) -%}
+            {%- for entity in wiser -%}
+              {%- set dev = device_id(entity) -%}
+              {%- if dev and device_attr(dev, 'model') == 'Hot Water' and dev not in ns.devices -%}
+                {%- set ns.devices = ns.devices + [dev] -%}
+              {%- endif -%}
+              {%- if entity.startswith('climate.') and
+                    (state_attr(entity, 'heating_type') is not none or
+                     (dev and device_attr(dev, 'model') == 'Room')) -%}
+                {%- set presets = state_attr(entity, 'preset_modes') or [] -%}
+                {%- set cancel = namespace(value='') -%}
+                {%- for preset in presets -%}
+                  {%- if 'cancel' in (preset | lower) and 'override' in (preset | lower) -%}
+                    {%- set cancel.value = preset -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {%- set available = states(entity) not in ['unknown', 'unavailable'] -%}
+                {%- set target = state_attr(entity, 'temperature') -%}
+                {%- set lo = state_attr(entity, 'min_temp') -%}
+                {%- set hi = state_attr(entity, 'max_temp') -%}
+                {%- set step = state_attr(entity, 'target_temp_step') | float(0.5) -%}
+                {%- set ns.rooms = ns.rooms + [dict(
+                    id=entity, entity=entity, kind='room', name=state_attr(entity, 'friendly_name') or entity,
+                    available=available, current=state_attr(entity, 'current_temperature'), target=target,
+                    minimum=lo, maximum=hi, step=step, unit=state_attr(entity, 'temperature_unit') or '°C',
+                    heating=state_attr(entity, 'is_heating'), boosted=state_attr(entity, 'is_boosted'),
+                    remaining=state_attr(entity, 'boost_time_remaining'), cancel_preset=cancel.value,
+                    can_set=available and is_number(target) and is_number(lo) and is_number(hi) and step > 0
+                      and ((state_attr(entity, 'supported_features') | int(0)) | bitwise_and(1)) != 0,
+                    can_boost=available, can_cancel=available and cancel.value != '' and state_attr(entity, 'is_boosted') == true
+                )] -%}
+              {%- endif -%}
+            {%- endfor -%}
+            {%- for dev in ns.devices | sort -%}
+              {%- set found = namespace(boost=[], cancel=[], status=[], switches=[], climate=[]) -%}
+              {%- for entity in device_entities(dev) if entity in wiser -%}
+                {%- if entity.startswith('button.') and state_attr(entity, 'icon') == 'mdi:water-plus' -%}
+                  {%- set found.boost = found.boost + [entity] -%}
+                {%- elif entity.startswith('button.') and state_attr(entity, 'icon') == 'mdi:water-off' -%}
+                  {%- set found.cancel = found.cancel + [entity] -%}
+                {%- elif entity.startswith('climate.') -%}
+                  {%- set found.climate = found.climate + [entity] -%}
+                {%- elif entity.startswith('switch.') and state_attr(entity, 'icon') == 'mdi:water-boiler' -%}
+                  {%- set found.switches = found.switches + [entity] -%}
+                {%- elif entity.startswith('sensor.') and state_attr(entity, 'is_boosted') is not none -%}
+                  {%- set found.status = found.status + [entity] -%}
+                {%- endif -%}
+              {%- endfor -%}
+              {%- set override = hot_water_overrides.get(dev, {}) -%}
+              {%- set boost = override.get('boost_entity', found.boost[0] if found.boost | count == 1 else '') -%}
+              {%- set cancel = override.get('cancel_entity', found.cancel[0] if found.cancel | count == 1 else '') -%}
+              {%- set status = override.get('status_entity', found.climate[0] if found.climate | count == 1
+                  else found.status[0] if found.status | count == 1
+                  else found.switches[0] if found.switches | count == 1 else '') -%}
+              {%- set valid = device_entities(dev) | select('in', wiser) | list -%}
+              {%- set boost = boost if boost in valid and boost.startswith('button.') else '' -%}
+              {%- set cancel = cancel if cancel in valid and cancel.startswith('button.') else '' -%}
+              {%- set status = status if status in valid else '' -%}
+              {%- set available = status != '' and states(status) not in ['unknown', 'unavailable'] -%}
+              {%- set ns.water = ns.water + [dict(
+                  id=dev, kind='hot_water', name=device_attr(dev, 'name_by_user') or device_attr(dev, 'name') or 'Hot water',
+                  available=available, current=state_attr(status, 'current_temperature'),
+                  target=state_attr(status, 'temperature'), low=state_attr(status, 'target_temp_low'),
+                  high=state_attr(status, 'target_temp_high'), unit=state_attr(status, 'temperature_unit') or '°C',
+                  heating=state_attr(status, 'is_heating') if state_attr(status, 'is_heating') is not none
+                    else (states(status) == 'on' if available and states(status) in ['on', 'off'] else none),
+                  boosted=state_attr(status, 'is_boosted'), remaining=state_attr(status, 'boost_time_remaining'),
+                  boost_entity=boost, cancel_entity=cancel, can_set=false,
+                  can_boost=boost != '' and (expand(boost) | list | count) == 1 and states(boost) != 'unavailable',
+                  can_cancel=cancel != '' and (expand(cancel) | list | count) == 1 and states(cancel) != 'unavailable',
+                  diagnostic='Check hot water entity overrides' if not status or not boost or not cancel else ''
+              )] -%}
+            {%- endfor -%}
+            {{ dict(version=1, cards=(ns.rooms | sort(attribute='name')) + (ns.water | sort(attribute='name'))) }}
+      - stop: Snapshot ready
+        response_variable: snapshot
+
+  ha_console_wiser_command:
+    alias: HA Console - Wiser command
+    mode: queued
+    max: 10
+    fields:
+      card_id:
+        required: true
+        selector:
+          text:
+      operation:
+        required: true
+        selector:
+          select:
+            options: [set_temperature, boost, cancel_boost]
+      temperature:
+        selector:
+          number:
+            min: 0
+            max: 100
+            step: 0.1
+    sequence:
+      - action: script.ha_console_wiser_snapshot
+        response_variable: snapshot
+      - variables:
+          matches: "{{ snapshot.cards | selectattr('id', 'eq', card_id) | list }}"
+      - if: "{{ matches | count != 1 or operation not in ['set_temperature', 'boost', 'cancel_boost'] }}"
+        then:
+          - stop: Unknown Wiser card or operation
+            error: true
+      - variables:
+          card: "{{ matches[0] }}"
+      - choose:
+          - conditions: "{{ operation == 'set_temperature' and card.can_set }}"
+            sequence:
+              - if: >-
+                  {{ not is_number(temperature | default(none)) or
+                     temperature | float < card.minimum | float or
+                     temperature | float > card.maximum | float or
+                     ((((temperature | float - card.minimum | float) / card.step | float) -
+                       ((temperature | float - card.minimum | float) / card.step | float) | round) | abs > 0.01) }}
+                then:
+                  - stop: Invalid Wiser target temperature
+                    error: true
+              - action: climate.set_temperature
+                target:
+                  entity_id: "{{ card.entity }}"
+                data:
+                  temperature: "{{ temperature | float }}"
+          - conditions: "{{ operation == 'boost' and card.can_boost }}"
+            sequence:
+              - choose:
+                  - conditions: "{{ card.kind == 'room' }}"
+                    sequence:
+                      # The Wiser entity service defaults to the hub's configured duration/delta.
+                      - action: wiser.boost_heating
+                        target:
+                          entity_id: "{{ card.entity }}"
+                default:
+                  - action: button.press
+                    target:
+                      entity_id: "{{ card.boost_entity }}"
+          - conditions: "{{ operation == 'cancel_boost' and card.can_cancel and card.boosted != false }}"
+            sequence:
+              - choose:
+                  - conditions: "{{ card.kind == 'room' }}"
+                    sequence:
+                      - action: climate.set_preset_mode
+                        target:
+                          entity_id: "{{ card.entity }}"
+                        data:
+                          preset_mode: "{{ card.cancel_preset }}"
+                default:
+                  - action: button.press
+                    target:
+                      entity_id: "{{ card.cancel_entity }}"
+        default:
+          - stop: Wiser control is unavailable
+            error: true
+      - variables:
+          result:
+            ok: true
+      - stop: Command accepted; refresh HA state to confirm
+        response_variable: result

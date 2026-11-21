@@ -22,6 +22,7 @@ The destination must look like this:
     ├── base.yaml
     ├── homeassistant.yaml
     ├── ui.yaml
+    ├── heating.yaml
     └── hardware/
         ├── waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
         └── waveshare-esp32-s3-touch-lcd-4.3.yaml
@@ -93,3 +94,110 @@ check the compatibility guidance in the main README if Wi-Fi fails.
 
 From this folder, with ESPHome installed and secrets configured,
 `esphome run ha-console.yaml` remains available for advanced users.
+
+## Wiser heating and hot water
+
+Use the `asantaga/wiserHomeAssistantPlatform` integration (domain `wiser`).
+Discovery runs in HA, where the entity/device registry is available. One card
+represents one heating room, even if it contains several radiator valves.
+Hot water appears once per Wiser hot water device. Rooms are sorted by name,
+followed by hot water. Entities renamed in HA are supported.
+
+### Install the Home Assistant package
+
+1. Copy `homeassistant/packages/ha_console_wiser.yaml` from this repository to
+   `/config/packages/ha_console_wiser.yaml` on **Home Assistant**. This file
+   belongs to HA, not Device Builder or the console's `packages/` directory.
+2. If HA packages are not enabled, merge this into `configuration.yaml` under
+   the existing `homeassistant:` key (do not create a duplicate key):
+
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+
+3. Check HA's configuration and restart HA to load the package. It creates
+   `script.ha_console_wiser_snapshot` and `script.ha_console_wiser_command`.
+   Later script-only changes can be applied with Reload Scripts.
+4. Keep **Allow the device to perform Home Assistant actions** enabled on the
+   console's ESPHome integration. Use HA Core 2026.11 or newer (including climate temperature-unit attributes)
+   and ESPHome 2026.11.0 or newer for this configuration.
+5. Validate, compile and install the console firmware. Its remote package list
+   now includes `esphome/packages/heating.yaml`; that file must be present on
+   the selected GitHub ref before remote-package builds can succeed.
+
+The page refreshes every 15 seconds, on entry, and after commands. Added and
+removed devices appear automatically. Readings older than 45 seconds disable
+controls. Loading, empty discovery, unavailable entities and script/action
+failures have separate messages. Commands are not replayed after reconnection.
+If a command times out, check HA/device state before retrying: HA may already
+have applied it.
+
+### Controls and layout
+
+```yaml
+substitutions:
+  heating_rows: '2'
+  heating_columns: '3'
+```
+
+Both values must be positive integers. Each horizontal screen holds their
+product in row-major order. One screen disables further useful scrolling;
+extra cards create additional horizontally snapped screens. Row/column changes
+require a firmware rebuild. Higher densities can reduce text and touch usability;
+the default is intended for the supported landscape displays.
+
+Tap a room's target to open minus/plus controls. Apply sends one target change;
+Cancel leaves the target alone. Limits and step come from HA (0.5° step if HA
+omits it). Wiser's configured setpoint mode still determines how long a target
+change lasts. Passive rooms exposing only a temperature range are read-only.
+Boost uses the Wiser integration's configured heating duration and temperature
+increase. Cancel uses its cancel-overrides preset and is enabled during boost.
+
+Hot water uses its per-device Boost Hot Water and Cancel Hot Water Overrides
+buttons, retaining Wiser's hot water boost duration. Current/target temperatures
+are shown only when the optional tank climate setup supplies them, including
+low/high targets where applicable. Hot water temperatures are read-only.
+When boost status is unknown, cancellation is available if HA exposes its
+cancel button; Wiser's cancellation also clears other hot water overrides.
+
+### Customized hot water entities
+
+Discovery associates hot water entities by the HA device model `Hot Water`.
+Within that device it identifies the boost/cancel buttons using their Wiser
+icons (`mdi:water-plus`, `mdi:water-off`). It prefers a climate entity for status,
+then a sensor with Wiser boost attributes, then the hot water relay switch.
+Disabled or ambiguous entities can produce “Check HA mapping”. Enable the
+required entities in HA, or edit `hot_water_overrides` in the snapshot script:
+
+```yaml
+hot_water_overrides:
+  YOUR_HA_HOT_WATER_DEVICE_ID:
+    boost_entity: button.your_boost_hot_water
+    cancel_entity: button.your_cancel_hot_water_overrides
+    status_entity: sensor.your_hot_water
+```
+
+The device ID is the final component of its HA device settings URL. Overrides
+must refer to entities belonging to that same Wiser device. Use one mapping
+per hot water device when several hubs are installed. Reload Scripts after
+editing. If the scripts are renamed, set `heating_snapshot_action` and
+`heating_command_action` substitutions to their new action names.
+
+### Local checks
+
+To test this checkout without waiting for changes to reach GitHub:
+
+```bash
+python tools/local_config.py --hardware p4
+esphome config esphome/.ci-p4.yaml
+esphome compile esphome/.ci-p4.yaml
+python -m unittest discover -s tests -v
+```
+
+Use `--hardware s3` and `.ci-s3.yaml` for the smaller board. Generated entry
+points are ignored by Git and use the existing local secrets. Tests exercise
+the actual HA discovery and command templates against simulated states and
+registry data; they do not replace HA configuration checking or physical touch
+testing. On hardware, check six-card readability, seventh-card swiping without
+accidental activation, target editing, boost/cancellation, and HA reconnection.

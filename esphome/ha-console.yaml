@@ -34,6 +34,10 @@ substitutions:
     - { entity: switch.coffee_machine, label: Coffee }
     - { entity: light.bedroom, label: Bedroom }
 
+  # --- Heating page: visible cards per horizontal swipe ----------------------
+  heating_rows: '2'
+  heating_columns: '3'
+
   # --- Home Assistant sensors shown on the "Sensors" page ---------------------
   temperature_entity: sensor.skink_internal_temperature
   humidity_entity: sensor.living_room_humidity
@@ -55,6 +59,7 @@ packages:
       - ${hardware_package}
       - esphome/packages/homeassistant.yaml
       - esphome/packages/ui.yaml
+      - esphome/packages/heating.yaml
 
 # Keep connectivity and secrets local: remote packages cannot resolve !secret.
 # This replaces the local packages/base.yaml include.

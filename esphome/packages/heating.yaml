@@ -1,0 +1,561 @@
+# Dynamic Wiser page. HA discovery/commands are in homeassistant/packages/.
+substitutions:
+  heating_rows: '2'
+  heating_columns: '3'
+  heating_snapshot_action: script.ha_console_wiser_snapshot
+  heating_command_action: script.ha_console_wiser_command
+
+# All UI/state stays in this YAML so remote package users need no local headers.
+globals:
+  - id: heating_snapshot
+    type: std::string
+    initial_value: '""'
+  - id: heating_last_snapshot
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_fetch_started
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_command_generation
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_command_started
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_pending
+    type: std::string
+    initial_value: '""'
+  - id: heating_waiting_confirmation
+    type: bool
+    initial_value: 'false'
+  - id: heating_error_card
+    type: std::string
+    initial_value: '""'
+  - id: heating_error
+    type: std::string
+    initial_value: '""'
+  - id: heating_selected
+    type: std::string
+    initial_value: '""'
+  - id: heating_edit_value
+    type: float
+    initial_value: '0'
+  - id: heating_edit_min
+    type: float
+    initial_value: '0'
+  - id: heating_edit_max
+    type: float
+    initial_value: '0'
+  - id: heating_edit_step
+    type: float
+    initial_value: '0.5'
+  - id: heating_edit_unit
+    type: std::string
+    initial_value: '"°C"'
+
+script:
+  - id: heating_refresh
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(heating_fetch_started) == 0 && api::global_api_server->is_connected_with_state_subscription();
+          then:
+            - lambda: id(heating_fetch_started) = millis();
+            - script.execute:
+                id: heating_fetch
+                request_id: !lambda return int(id(heating_fetch_started));
+
+  - id: heating_fetch
+    mode: parallel
+    parameters:
+      request_id: int
+    then:
+      - homeassistant.action:
+          action: ${heating_snapshot_action}
+          capture_response: true
+          on_success:
+            - lambda: |-
+                if (uint32_t(request_id) != id(heating_fetch_started)) return;
+                id(heating_fetch_started) = 0;
+                auto data = response["response"].as<JsonObjectConst>();
+                if (data["version"].as<int>() != 1 || !data["cards"].is<JsonArrayConst>()) {
+                  id(heating_error) = "Invalid Wiser snapshot";
+                  return;
+                }
+                // Validate before replacing the last usable snapshot.
+                std::vector<std::string> ids;
+                for (auto card : data["cards"].as<JsonArrayConst>()) {
+                  std::string key = card["id"] | "";
+                  std::string kind = card["kind"] | "";
+                  if (key.empty() || (kind != "room" && kind != "hot_water") ||
+                      std::find(ids.begin(), ids.end(), key) != ids.end()) {
+                    id(heating_error) = "Invalid Wiser cards";
+                    return;
+                  }
+                  ids.push_back(key);
+                }
+                id(heating_snapshot).clear();
+                serializeJson(data, id(heating_snapshot));
+                id(heating_last_snapshot) = millis();
+                if (id(heating_waiting_confirmation)) {
+                  id(heating_waiting_confirmation) = false;
+                  id(heating_pending).clear();
+                  id(heating_command_started) = 0;
+                }
+                if (id(heating_error) == "Wiser discovery failed - check HA package/permissions" ||
+                    id(heating_error) == "Wiser discovery timed out" ||
+                    id(heating_error) == "Invalid Wiser snapshot" ||
+                    id(heating_error) == "Invalid Wiser cards") id(heating_error).clear();
+            - script.execute: heating_render
+          on_error:
+            - lambda: |-
+                if (uint32_t(request_id) != id(heating_fetch_started)) return;
+                id(heating_fetch_started) = 0;
+                id(heating_error) = "Wiser discovery failed - check HA package/permissions";
+            - script.execute: heating_render
+
+  - id: heating_command
+    mode: single
+    parameters:
+      card_id: string
+      operation: string
+      temperature: float
+      request_id: int
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(heating_pending).empty() && id(heating_last_snapshot) != 0 &&
+                     uint32_t(millis() - id(heating_last_snapshot)) < 45000 &&
+                     api::global_api_server->is_connected_with_state_subscription();
+          then:
+            - lambda: |-
+                id(heating_pending) = card_id;
+                id(heating_command_generation) = uint32_t(request_id);
+                id(heating_command_started) = millis();
+                id(heating_error).clear();
+                id(heating_error_card).clear();
+            - script.execute: heating_render
+            - homeassistant.action:
+                action: ${heating_command_action}
+                data:
+                  card_id: !lambda return card_id;
+                  operation: !lambda return operation;
+                  temperature: !lambda return temperature;
+                capture_response: true
+                on_success:
+                  - lambda: |-
+                      if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
+                      if (!(response["response"]["ok"] | false)) {
+                        id(heating_error_card) = id(heating_pending);
+                        id(heating_pending).clear();
+                        id(heating_command_started) = 0;
+                        id(heating_error) = "Wiser command was not accepted";
+                      }
+                  - script.execute:
+                      id: heating_confirm
+                      request_id: !lambda return request_id;
+                on_error:
+                  - lambda: |-
+                      if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
+                      id(heating_error) = "Wiser command failed - check room and HA logs";
+                      id(heating_error_card) = id(heating_pending);
+                      id(heating_pending).clear();
+                      id(heating_command_started) = 0;
+                  - script.execute: heating_render
+
+  # Wait out an older snapshot so only a post-command read releases controls.
+  - id: heating_confirm
+    mode: parallel
+    parameters:
+      request_id: int
+    then:
+      - wait_until:
+          condition:
+            lambda: return id(heating_fetch_started) == 0;
+          timeout: 16s
+      - if:
+          condition:
+            lambda: return uint32_t(request_id) == id(heating_command_generation) && !id(heating_pending).empty();
+          then:
+            - lambda: id(heating_waiting_confirmation) = true;
+            - script.execute: heating_refresh
+
+  - id: heating_edit_update
+    then:
+      - lambda: |-
+          lv_label_set_text_fmt(id(heating_edit_label), "%.1f %s", id(heating_edit_value), id(heating_edit_unit).c_str());
+
+  - id: heating_render
+    then:
+      - lambda: |-
+          constexpr int rows = ${heating_rows};
+          constexpr int columns = ${heating_columns};
+          static_assert(rows > 0 && columns > 0, "Heating rows and columns must be positive");
+          constexpr int per_page = rows * columns;
+          struct Card {
+            std::string key, name, unit;
+            bool editable = false, boostable = false, cancelable = false;
+            float target = 0, minimum = 0, maximum = 0, step = 0.5;
+            lv_obj_t *name_label, *current_label, *target_button, *target_label;
+            lv_obj_t *status_label, *boost_button, *cancel_button;
+          };
+          static std::vector<Card *> cards;
+          static std::vector<std::string> signature;
+          static int32_t col_tracks[columns + 1];
+          static int32_t row_tracks[rows + 1];
+          static int old_width = 0, old_height = 0;
+          JsonDocument doc;
+          if (deserializeJson(doc, id(heating_snapshot))) {
+            lv_label_set_text(id(heating_notice), id(heating_error).empty()
+                ? "Discovering Wiser devices..." : id(heating_error).c_str());
+            return;
+          }
+          auto data = doc["cards"].as<JsonArrayConst>();
+          auto *viewport = id(heating_viewport);
+          lv_obj_update_layout(viewport);
+          int width = lv_obj_get_content_width(viewport);
+          int height = lv_obj_get_content_height(viewport);
+          if (width <= 0 || height <= 0) return;
+          std::vector<std::string> keys;
+          for (auto item : data) keys.push_back(std::string(item["id"] | "") + ":" + (item["kind"] | ""));
+          if (keys != signature || old_width != width || old_height != height) {
+            // Delete widgets/callbacks before freeing their Card contexts.
+            lv_obj_clean(viewport);
+            for (auto *card : cards) delete card;
+            cards.clear();
+            signature = keys;
+            old_width = width;
+            old_height = height;
+            // A discovery change invalidates an open edit dialog.
+            lv_obj_set_hidden(id(heating_dialog), true);
+            id(heating_selected).clear();
+            for (int i = 0; i < columns; ++i) col_tracks[i] = LV_GRID_FR(1);
+            for (int i = 0; i < rows; ++i) row_tracks[i] = LV_GRID_FR(1);
+            col_tracks[columns] = LV_GRID_TEMPLATE_LAST;
+            row_tracks[rows] = LV_GRID_TEMPLATE_LAST;
+            lv_obj_t *grid = nullptr;
+            int index = 0;
+            for (auto item : data) {
+              int cell = index % per_page;
+              if (cell == 0) {
+                grid = lv_obj_create(viewport);
+                lv_obj_set_size(grid, width, height);
+                lv_obj_set_scrollable(grid, false);
+                lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+                lv_obj_set_style_border_width(grid, 0, 0);
+                lv_obj_set_style_pad_all(grid, 0, 0);
+                lv_obj_set_style_pad_row(grid, 8, 0);
+                lv_obj_set_style_pad_column(grid, 8, 0);
+                lv_obj_set_grid_dsc_array(grid, col_tracks, row_tracks);
+              }
+              auto *card = new Card();
+              card->key = item["id"] | "";
+              cards.push_back(card);
+              auto *box = lv_obj_create(grid);
+              lv_obj_set_grid_cell(box, LV_GRID_ALIGN_STRETCH, cell % columns, 1,
+                                  LV_GRID_ALIGN_STRETCH, cell / columns, 1);
+              lv_obj_set_scrollable(box, false);
+              lv_obj_set_style_pad_all(box, 6, 0);
+              lv_obj_set_style_pad_row(box, 2, 0);
+              lv_obj_set_style_radius(box, 12, 0);
+              lv_obj_set_style_border_width(box, 0, 0);
+              lv_obj_set_style_bg_color(box, lv_color_hex(0x22282E), 0);
+              lv_obj_set_style_text_color(box, lv_color_hex(0xE0E0E0), 0);
+              lv_obj_set_style_text_font(box, &lv_font_montserrat_16, 0);
+              lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+              auto label = [](lv_obj_t *parent) {
+                auto *obj = lv_label_create(parent);
+                lv_obj_set_width(obj, lv_pct(100));
+                lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, 0);
+                lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
+                return obj;
+              };
+              const int button_height = std::max(30, std::min(42, ((height - (rows - 1) * 8) / rows) / 5));
+              auto button = [button_height](lv_obj_t *parent, const char *text) {
+                auto *obj = lv_button_create(parent);
+                lv_obj_set_height(obj, button_height);
+                lv_obj_set_scrollable(obj, false);
+                lv_obj_set_style_pad_all(obj, 2, 0);
+                lv_obj_set_style_radius(obj, 6, 0);
+                lv_obj_set_style_bg_color(obj, lv_color_hex(0x3A4652), 0);
+                lv_obj_set_style_text_color(obj, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_shadow_width(obj, 0, 0);
+                lv_obj_set_style_border_width(obj, 0, 0);
+                auto *caption = lv_label_create(obj);
+                lv_label_set_text(caption, text);
+                lv_obj_center(caption);
+                return obj;
+              };
+              card->name_label = label(box);
+              card->current_label = label(box);
+              lv_obj_set_style_text_font(card->current_label, &lv_font_montserrat_20, 0);
+              card->target_button = button(box, "--");
+              lv_obj_set_width(card->target_button, lv_pct(100));
+              card->target_label = lv_obj_get_child(card->target_button, 0);
+              card->status_label = label(box);
+              // Extra vertical space is absorbed above the action buttons.
+              auto *actions = lv_obj_create(box);
+              lv_obj_set_width(actions, lv_pct(100));
+              lv_obj_set_height(actions, button_height);
+              lv_obj_set_style_pad_all(actions, 0, 0);
+              lv_obj_set_style_border_width(actions, 0, 0);
+              lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
+              lv_obj_set_scrollable(actions, false);
+              lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+              lv_obj_set_style_pad_column(actions, 4, 0);
+              card->boost_button = button(actions, "Boost");
+              card->cancel_button = button(actions, "Cancel");
+              lv_obj_set_flex_grow(card->boost_button, 1);
+              lv_obj_set_flex_grow(card->cancel_button, 1);
+              lv_obj_add_event_cb(card->target_button, [](lv_event_t *event) {
+                auto *c = static_cast<Card *>(lv_event_get_user_data(event));
+                if (!c->editable) return;
+                id(heating_selected) = c->key;
+                id(heating_edit_value) = c->target;
+                id(heating_edit_min) = c->minimum;
+                id(heating_edit_max) = c->maximum;
+                id(heating_edit_step) = c->step;
+                id(heating_edit_unit) = c->unit;
+                lv_label_set_text(id(heating_edit_title), c->name.c_str());
+                id(heating_edit_update).execute();
+                lv_obj_set_hidden(id(heating_dialog), false);
+              }, LV_EVENT_SHORT_CLICKED, card);
+              lv_obj_add_event_cb(card->boost_button, [](lv_event_t *event) {
+                auto *c = static_cast<Card *>(lv_event_get_user_data(event));
+                if (c->boostable) id(heating_command).execute(c->key, "boost", 0, int(millis()));
+              }, LV_EVENT_SHORT_CLICKED, card);
+              lv_obj_add_event_cb(card->cancel_button, [](lv_event_t *event) {
+                auto *c = static_cast<Card *>(lv_event_get_user_data(event));
+                if (c->cancelable) id(heating_command).execute(c->key, "cancel_boost", 0, int(millis()));
+              }, LV_EVENT_SHORT_CLICKED, card);
+              ++index;
+            }
+            lv_obj_update_layout(viewport);
+            lv_obj_scroll_to_x(viewport, 0, LV_ANIM_OFF);
+          }
+          bool fresh = api::global_api_server->is_connected_with_state_subscription() && id(heating_last_snapshot) != 0 &&
+                       uint32_t(millis() - id(heating_last_snapshot)) < 45000;
+          bool enabled = fresh && id(heating_pending).empty() &&
+                         api::global_api_server->is_connected_with_state_subscription();
+          auto set_enabled = [](lv_obj_t *widget, bool value) {
+            if (value) lv_obj_remove_state(widget, LV_STATE_DISABLED);
+            else lv_obj_add_state(widget, LV_STATE_DISABLED);
+          };
+          size_t index = 0;
+          bool selected_valid = false;
+          for (auto item : data) {
+            auto *c = cards[index++];
+            c->name = item["name"] | "Wiser";
+            c->unit = item["unit"] | "°C";
+            c->target = item["target"] | 0.0f;
+            c->minimum = item["minimum"] | 0.0f;
+            c->maximum = item["maximum"] | 0.0f;
+            c->step = item["step"] | 0.5f;
+            c->editable = enabled && (item["can_set"] | false);
+            c->boostable = enabled && (item["can_boost"] | false);
+            c->cancelable = enabled && (item["can_cancel"] | false) &&
+                            (!item["boosted"].is<bool>() || item["boosted"].as<bool>());
+            if (c->key == id(heating_selected) && c->editable) selected_valid = true;
+            lv_label_set_text(c->name_label, c->name.c_str());
+            if (item["current"].is<float>())
+              lv_label_set_text_fmt(c->current_label, "Now %.1f %s", item["current"].as<float>(), c->unit.c_str());
+            else lv_label_set_text(c->current_label, "Now --");
+            if (item["target"].is<float>())
+              lv_label_set_text_fmt(c->target_label, "Target %.1f %s", c->target, c->unit.c_str());
+            else if (item["low"].is<float>() && item["high"].is<float>())
+              lv_label_set_text_fmt(c->target_label, "%.0f-%.0f %s", item["low"].as<float>(), item["high"].as<float>(), c->unit.c_str());
+            else lv_label_set_text(c->target_label, "Target --");
+            if (id(heating_pending) == c->key) lv_label_set_text(c->status_label, "Sending...");
+            else if (id(heating_error_card) == c->key) lv_label_set_text(c->status_label, "Command failed");
+            else if (!fresh) lv_label_set_text(c->status_label, "Offline / stale");
+            else if (item["boosted"] | false)
+              lv_label_set_text_fmt(c->status_label, "Boost %dm", item["remaining"] | 0);
+            else if (!std::string(item["diagnostic"] | "").empty()) lv_label_set_text(c->status_label, "Check HA mapping");
+            else if (!(item["available"] | false)) lv_label_set_text(c->status_label, "Unavailable");
+            else if (item["heating"].is<bool>()) lv_label_set_text(c->status_label, item["heating"].as<bool>() ? "Heating" : "Idle");
+            else lv_label_set_text(c->status_label, "Status unknown");
+            set_enabled(c->target_button, c->editable);
+            set_enabled(c->boost_button, c->boostable);
+            set_enabled(c->cancel_button, c->cancelable);
+          }
+          if (!selected_valid) lv_obj_set_hidden(id(heating_dialog), true);
+          int pages = (cards.size() + per_page - 1) / per_page;
+          int page = width > 0 ? (lv_obj_get_scroll_x(viewport) + width / 2) / width + 1 : 1;
+          if (!id(heating_error).empty()) lv_label_set_text(id(heating_notice), id(heating_error).c_str());
+          else if (!fresh) lv_label_set_text(id(heating_notice), "Wiser offline - waiting for Home Assistant");
+          else if (cards.empty()) lv_label_set_text(id(heating_notice), "No Wiser heating rooms or hot water found");
+          else lv_label_set_text_fmt(id(heating_notice), "Heating  %d/%d   -   swipe left/right", page, pages);
+
+interval:
+  - interval: 15s
+    then:
+      - script.execute: heating_refresh
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(heating_fetch_started) != 0 && uint32_t(millis() - id(heating_fetch_started)) > 15000) {
+                id(heating_fetch_started) = 0;
+            id(heating_error) = "Wiser discovery timed out";
+          }
+          if (id(heating_command_started) != 0 && uint32_t(millis() - id(heating_command_started)) > 15000) {
+            id(heating_command_started) = 0;
+            id(heating_waiting_confirmation) = false;
+            id(heating_error_card) = id(heating_pending);
+            id(heating_pending).clear();
+            id(heating_error) = "Wiser command timed out - check HA before retrying";
+          }
+      - script.execute: heating_render
+
+api:
+  on_client_connected:
+    - delay: 2s
+    - script.execute: heating_refresh
+
+lvgl:
+  top_layer:
+    widgets:
+      - obj:
+          id: heating_dialog
+          hidden: true
+          align: CENTER
+          width: 100%
+          height: 100%
+          bg_color: 0x000000
+          bg_opa: 70%
+          border_width: 0
+          radius: 0
+          pad_all: 0
+          scrollable: false
+          widgets:
+            - obj:
+                align: CENTER
+                width: 90%
+                height: 300
+                bg_color: 0x22282E
+                text_color: 0xFFFFFF
+                scrollable: false
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  flex_align_main: SPACE_EVENLY
+                  flex_align_cross: CENTER
+                widgets:
+                  - label:
+                      id: heating_edit_title
+                      width: 100%
+                      text_align: CENTER
+                      long_mode: DOT
+                      text: Set target temperature
+                  - label:
+                      id: heating_edit_label
+                      text: '--'
+                      text_font: montserrat_28
+                  - obj:
+                      width: 100%
+                      height: 52
+                      bg_opa: TRANSP
+                      border_width: 0
+                      pad_all: 0
+                      scrollable: false
+                      layout:
+                        type: FLEX
+                        flex_flow: ROW
+                        flex_align_main: SPACE_EVENLY
+                      widgets:
+                        - button:
+                            width: 40%
+                            height: 48
+                            widgets:
+                              - label:
+                                  align: CENTER
+                                  text: '-'
+                            on_click:
+                              - lambda: |-
+                                  id(heating_edit_value) = std::max(id(heating_edit_min), id(heating_edit_value) - id(heating_edit_step));
+                              - script.execute: heating_edit_update
+                        - button:
+                            width: 40%
+                            height: 48
+                            widgets:
+                              - label:
+                                  align: CENTER
+                                  text: '+'
+                            on_click:
+                              - lambda: |-
+                                  id(heating_edit_value) = std::min(id(heating_edit_max), id(heating_edit_value) + id(heating_edit_step));
+                              - script.execute: heating_edit_update
+                  - obj:
+                      width: 100%
+                      height: 52
+                      bg_opa: TRANSP
+                      border_width: 0
+                      pad_all: 0
+                      scrollable: false
+                      layout:
+                        type: FLEX
+                        flex_flow: ROW
+                        flex_align_main: SPACE_EVENLY
+                      widgets:
+                        - button:
+                            width: 40%
+                            height: 48
+                            widgets:
+                              - label:
+                                  align: CENTER
+                                  text: Cancel
+                            on_click:
+                              - lvgl.widget.hide: heating_dialog
+                        - button:
+                            width: 40%
+                            height: 48
+                            widgets:
+                              - label:
+                                  align: CENTER
+                                  text: Apply
+                            on_click:
+                              - script.execute:
+                                  id: heating_command
+                                  card_id: !lambda return id(heating_selected);
+                                  operation: set_temperature
+                                  temperature: !lambda return id(heating_edit_value);
+                                  request_id: !lambda return int(millis());
+                              - lvgl.widget.hide: heating_dialog
+  pages:
+    - id: heating_page
+      pad_top: 62
+      pad_bottom: 82
+      pad_left: 12
+      pad_right: 12
+      scrollable: false
+      on_load:
+        - script.execute: heating_refresh
+      layout:
+        type: FLEX
+        flex_flow: COLUMN
+        pad_row: 4
+      widgets:
+        - label:
+            id: heating_notice
+            text_font: montserrat_16
+            width: 100%
+            height: 24
+            long_mode: DOT
+            text: Discovering Wiser devices...
+        - obj:
+            id: heating_viewport
+            width: 100%
+            height: 0
+            flex_grow: 1
+            pad_all: 0
+            border_width: 0
+            bg_opa: TRANSP
+            scrollbar_mode: AUTO
+            scroll_dir: HOR
+            scroll_snap_x: START
+            layout:
+              type: FLEX
+              flex_flow: ROW
+              pad_column: 0
+            widgets: []

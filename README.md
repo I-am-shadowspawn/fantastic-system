@@ -13,6 +13,7 @@ integration. No MQTT broker, custom component or add-on is required.
 |------|--------------|
 | **Home** | 4 toggle tiles bound to HA lights/switches. Tile state follows HA; tapping calls `homeassistant.toggle`. |
 | **Sensors** | Live indoor temperature, humidity and outdoor temperature imported from HA. |
+| **Heating** | Discovered Wiser heating rooms and hot water; temperatures, room target editing, boost and cancellation. |
 | **Console** | 6 buttons that fire a **Console Button** event entity in HA – use them to trigger any automation/scene/script. |
 
 Always visible: status bar (clock from HA, message from an `input_text`,
@@ -45,6 +46,7 @@ esphome/
 └── packages/
     ├── base.yaml                # WiFi, API, OTA, logger, time, diagnostics
     ├── homeassistant.yaml       # HA entity imports + entities exposed to HA
+    ├── heating.yaml             # Wiser cards, target dialog and HA script calls
     ├── ui.yaml                  # LVGL pages, status/nav bar, screen timeout
     └── hardware/
         ├── waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
@@ -200,5 +202,22 @@ fresh timestamp, select **Clean Build Files** before installing.
 
 ## CI
 
-`.github/workflows/esphome.yml` validates and compiles the configuration on
-every push and pull request.
+`.github/workflows/esphome.yml` tests the Wiser HA templates and validates and
+compiles both hardware variants from the checked-out packages on pushes to
+`main`/`development` and pull requests. It does not build the remote branch.
+
+### Wiser heating page
+
+The fourth page discovers room heating and hot water from the
+`asantaga/wiserHomeAssistantPlatform` integration in Home Assistant. Install the
+supplied [HA package](homeassistant/packages/ha_console_wiser.yaml) in **Home
+Assistant**, then follow the [Wiser setup guide](esphome/README.md#wiser-heating-and-hot-water).
+The console continues to use its existing encrypted native API connection;
+no HA access token, MQTT broker or direct connection to the Wiser hub is needed.
+
+The default layout is two rows by three columns. Swipe horizontally for more
+cards. Set `heating_rows` and `heating_columns` in the device substitutions and
+rebuild to change the layout. Tap a room's target temperature to edit it, then
+Apply. Boost uses the defaults configured in Wiser; Cancel cancels the active
+boost using Wiser's cancel-overrides control. Hot water provides status and
+boost controls, plus read-only temperatures when HA exposes them.

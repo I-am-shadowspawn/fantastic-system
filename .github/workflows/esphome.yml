@@ -2,7 +2,7 @@ name: ESPHome
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
   workflow_dispatch:
 
@@ -12,15 +12,21 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        hardware: [p4, s3]
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
 
       - name: Install ESPHome
         run: pip install esphome==2026.11.0
+
+      - name: Test Wiser discovery and commands
+        run: python -m unittest discover -s tests -v
 
       - name: Create CI secrets
         working-directory: esphome
@@ -28,10 +34,11 @@ jobs:
           sed "s|^api_encryption_key:.*|api_encryption_key: \"$(openssl rand -base64 32)\"|" \
             secrets.yaml.example > secrets.yaml
 
+      - name: Select checked-out packages
+        run: python tools/local_config.py --hardware ${{ matrix.hardware }}
+
       - name: Validate configuration
-        working-directory: esphome
-        run: esphome config ha-console.yaml
+        run: esphome config esphome/.ci-${{ matrix.hardware }}.yaml
 
       - name: Compile firmware
-        working-directory: esphome
-        run: esphome compile ha-console.yaml
+        run: esphome compile esphome/.ci-${{ matrix.hardware }}.yaml

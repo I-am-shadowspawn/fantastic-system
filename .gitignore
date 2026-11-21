@@ -4,3 +4,5 @@ esphome/.esphome/
 .esphome/
 **/.pioenvs/
 **/.piolibdeps/
+esphome/.ci-*.yaml
+**/__pycache__/

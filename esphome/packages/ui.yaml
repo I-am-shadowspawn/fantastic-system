@@ -1,4 +1,4 @@
-# LVGL user interface: status bar, navigation bar and three pages
+# LVGL user interface: status bar, navigation bar and four pages
 #   Home    - toggle tiles bound to Home Assistant lights/switches
 #   Sensors - live values imported from Home Assistant
 #   Console - buttons that fire the "Console Button" event in Home Assistant
@@ -232,7 +232,7 @@ lvgl:
           widgets:
             - button:
                 styles: nav_button_style
-                width: 200
+                width: 23%
                 height: 60
                 widgets:
                   - label:
@@ -242,7 +242,7 @@ lvgl:
                   - lvgl.page.show: home_page
             - button:
                 styles: nav_button_style
-                width: 200
+                width: 23%
                 height: 60
                 widgets:
                   - label:
@@ -252,7 +252,7 @@ lvgl:
                   - lvgl.page.show: sensors_page
             - button:
                 styles: nav_button_style
-                width: 200
+                width: 23%
                 height: 60
                 widgets:
                   - label:
@@ -260,6 +260,18 @@ lvgl:
                       text: "\uF013"
                 on_click:
                   - lvgl.page.show: console_page
+
+            - button:
+                styles: nav_button_style
+                width: 23%
+                height: 60
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: Heating
+                      text_font: montserrat_20
+                on_click:
+                  - lvgl.page.show: heating_page
 
   pages:
     # --- Home: swipe between 5-column, 3-row grids of toggle tiles -----------
