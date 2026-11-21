@@ -5,8 +5,8 @@ esphome:
   min_version: 2026.11.0
 
 esp32:
-  board: esp32-p4-evboard
   variant: esp32p4
+  engineering_sample: false
   flash_size: 32MB
   cpu_frequency: 360MHz
   framework:
