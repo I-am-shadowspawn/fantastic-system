@@ -62,6 +62,8 @@ lvgl:
           height: 50
           radius: 0
           bg_color: 0x1A1F24
+          # The top layer does not inherit the active screen's text colour.
+          text_color: 0xE0E0E0
           border_width: 0
           pad_all: 0
           scrollable: false
