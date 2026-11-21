@@ -190,6 +190,14 @@ automation:
 Create an `input_text.ha_console_message` helper (or point `message_entity`
 at any entity) – its state is shown in the middle of the status bar.
 
+To show the installed firmware's build date and time instead, set
+`show_build_timestamp: true` under `substitutions:` in `ha-console.yaml`,
+then rebuild and install. The timestamp includes seconds and the build
+machine's timezone offset, and is visible even before Home Assistant connects.
+Set it back to `false` and rebuild to restore the Home Assistant message.
+ESPHome reuses the timestamp when it reuses an unchanged build. To force a
+fresh timestamp, select **Clean Build Files** before installing.
+
 ## CI
 
 `.github/workflows/esphome.yml` validates and compiles the configuration on

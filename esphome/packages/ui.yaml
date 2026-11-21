@@ -5,7 +5,7 @@
 #
 # Widgets use a flexible layout for the 1024x600 panel.
 
-# Build one grid per nine entries after LVGL is set up and before networking.
+# Build one grid per fifteen entries after LVGL is set up and before networking.
 # The fallback also accepts existing device YAMLs with the four numbered pairs.
 json:
 
@@ -14,6 +14,12 @@ esphome:
     priority: 300
     then:
       - lambda: |-
+          if constexpr (${ 'true' if show_build_timestamp | default(false) | lower == 'true' else 'false' }) {
+            char timestamp[Application::BUILD_TIME_STR_SIZE];
+            App.get_build_time_string(timestamp);
+            lv_label_set_text_fmt(id(status_message), "Build: %s", timestamp);
+          }
+
           const char *mapping = ${ (home_tiles if home_tiles is defined else [
               dict(entity=tile_1_entity, label=tile_1_label),
               dict(entity=tile_2_entity, label=tile_2_label),
@@ -39,9 +45,16 @@ esphome:
           constexpr size_t rows = 3;
 
           constexpr size_t tiles_per_page = columns * rows;
-          static const int32_t tracks[] = {
-            LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
-          };
+          static int32_t column_tracks[columns + 1];
+          static int32_t row_tracks[rows + 1];
+          for (size_t column = 0; column < columns; ++column) {
+            column_tracks[column] = LV_GRID_FR(1);
+          }
+          for (size_t row = 0; row < rows; ++row) {
+            row_tracks[row] = LV_GRID_FR(1);
+          }
+          column_tracks[columns] = LV_GRID_TEMPLATE_LAST;
+          row_tracks[rows] = LV_GRID_TEMPLATE_LAST;
           lv_obj_t *pages = id(home_pages);
           lv_obj_t *grid = id(home_first_grid);
           size_t index = 0;
@@ -57,7 +70,7 @@ esphome:
               lv_obj_set_style_pad_all(grid, 0, LV_PART_MAIN);
               lv_obj_set_style_pad_row(grid, 12, LV_PART_MAIN);
               lv_obj_set_style_pad_column(grid, 12, LV_PART_MAIN);
-              lv_obj_set_grid_dsc_array(grid, tracks, tracks);
+              lv_obj_set_grid_dsc_array(grid, column_tracks, row_tracks);
             }
 
             const std::string entity = tile["entity"].as<const char *>();
@@ -249,7 +262,7 @@ lvgl:
                   - lvgl.page.show: console_page
 
   pages:
-    # --- Home: swipe between 3-by-3 grids of toggle tiles --------------------
+    # --- Home: swipe between 5-column, 3-row grids of toggle tiles -----------
     - id: home_page
       pad_top: 62
       pad_bottom: 82
