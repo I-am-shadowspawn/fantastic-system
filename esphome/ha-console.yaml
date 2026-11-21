@@ -27,7 +27,7 @@ substitutions:
   idle_timeout: "0"
 
   # --- Home Assistant entities shown on the "Home" page -----------------------
-  # In display order. Add or remove pairs as needed. Swipe up for the next 9.
+  # In display order. Add or remove pairs as needed. Swipe up for the next 15.
   home_tiles:
     - { entity: light.fan_lamp_2, label: Bedroom Light }
     - { entity: light.kitchen, label: Kitchen }
