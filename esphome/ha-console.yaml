@@ -27,14 +27,12 @@ substitutions:
   idle_timeout: "60"
 
   # --- Home Assistant entities shown on the "Home" page -----------------------
-  tile_1_entity: light.fan_lamp_2
-  tile_1_label: Bedroom Light
-  tile_2_entity: light.kitchen
-  tile_2_label: Kitchen
-  tile_3_entity: switch.coffee_machine
-  tile_3_label: Coffee
-  tile_4_entity: light.bedroom
-  tile_4_label: Bedroom
+  # In display order. Add or remove pairs as needed. Swipe up for the next 9.
+  home_tiles:
+    - { entity: light.fan_lamp_2, label: Bedroom Light }
+    - { entity: light.kitchen, label: Kitchen }
+    - { entity: switch.coffee_machine, label: Coffee }
+    - { entity: light.bedroom, label: Bedroom }
 
   # --- Home Assistant sensors shown on the "Sensors" page ---------------------
   temperature_entity: sensor.skink_internal_temperature

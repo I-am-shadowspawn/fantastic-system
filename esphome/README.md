@@ -49,6 +49,13 @@ temperature and humidity entries must refer to sensors with numeric states.
 The supplied entity IDs reflect an example/local setup and must be reviewed.
 In particular, a camera entity cannot provide a numeric temperature reading.
 
+Edit `substitutions.home_tiles` to add, remove, or reorder Home buttons. Each
+list entry needs an `entity` (a toggleable Home Assistant entity ID) and a
+`label` (the button text). The Home screen shows nine entries per page in a
+3×3 grid. Swipe up to see the next page or down to go back. With nine or fewer
+entries, the Home screen stays on one page. Existing configurations can keep
+the four `tile_N_entity` and `tile_N_label` pairs until they adopt `home_tiles`.
+
 `hardware_package` defaults to the ESP32-P4 7B board. To use the supported S3
 board instead, change it to
 `packages/hardware/waveshare-esp32-s3-touch-lcd-4.3.yaml`.

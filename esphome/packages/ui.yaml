@@ -5,6 +5,116 @@
 #
 # Widgets use a flexible layout for the 1024x600 panel.
 
+# Build one grid per nine entries after LVGL is set up and before networking.
+# The fallback also accepts existing device YAMLs with the four numbered pairs.
+json:
+
+esphome:
+  on_boot:
+    priority: 300
+    then:
+      - lambda: |-
+          const char *mapping = ${ (home_tiles if home_tiles is defined else [
+              dict(entity=tile_1_entity, label=tile_1_label),
+              dict(entity=tile_2_entity, label=tile_2_label),
+              dict(entity=tile_3_entity, label=tile_3_label),
+              dict(entity=tile_4_entity, label=tile_4_label)
+            ] if tile_1_entity is defined else []) | tojson | tojson };
+
+          JsonDocument config;
+          if (deserializeJson(config, mapping) || !config.is<JsonArray>()) {
+            ESP_LOGE("home_tiles", "Expected a list of entity/label pairs");
+            return;
+          }
+          auto tiles = config.as<JsonArrayConst>();
+          for (JsonVariantConst tile : tiles) {
+            const char *entity = tile["entity"].as<const char *>();
+            if (entity == nullptr || *entity == '\0' || !tile["label"].is<const char *>()) {
+              ESP_LOGE("home_tiles", "Every tile needs an entity ID and a label");
+              return;
+            }
+          }
+
+          constexpr size_t columns = 3;
+          constexpr size_t tiles_per_page = columns * columns;
+          static const int32_t tracks[] = {
+            LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
+          };
+          lv_obj_t *pages = id(home_pages);
+          lv_obj_t *grid = id(home_first_grid);
+          size_t index = 0;
+          for (JsonVariantConst tile : tiles) {
+            const size_t cell = index % tiles_per_page;
+            if (cell == 0) {
+              if (index != 0) {
+                const auto direction = index + tiles_per_page < tiles.size()
+                    ? LV_DIR_VER : LV_DIR_TOP;
+                grid = lv_tileview_add_tile(pages, 0, index / tiles_per_page, direction);
+              }
+              lv_obj_remove_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+              lv_obj_set_style_pad_all(grid, 0, LV_PART_MAIN);
+              lv_obj_set_style_pad_row(grid, 12, LV_PART_MAIN);
+              lv_obj_set_style_pad_column(grid, 12, LV_PART_MAIN);
+              lv_obj_set_grid_dsc_array(grid, tracks, tracks);
+            }
+
+            const std::string entity = tile["entity"].as<const char *>();
+            auto *button = lv_button_create(grid);
+            lv_obj_remove_flag(button, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_grid_cell(button, LV_GRID_ALIGN_STRETCH, cell % columns, 1,
+                                LV_GRID_ALIGN_STRETCH, cell / columns, 1);
+            lv_obj_set_style_bg_color(button, lv_color_hex(0x22282E), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(button, lv_color_hex(0xF5A623), LV_STATE_CHECKED);
+            lv_obj_set_style_bg_opa(button, LV_OPA_COVER, LV_PART_MAIN);
+            lv_obj_set_style_text_color(button, lv_color_hex(0xE0E0E0), LV_PART_MAIN);
+            lv_obj_set_style_text_color(button, lv_color_hex(0x101418), LV_STATE_CHECKED);
+            lv_obj_set_style_radius(button, 16, LV_PART_MAIN);
+            lv_obj_set_style_border_width(button, 0, LV_PART_MAIN);
+            lv_obj_set_style_shadow_width(button, 0, LV_PART_MAIN);
+
+            auto *label = lv_label_create(button);
+            lv_obj_set_width(label, lv_pct(92));
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+            lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+            const char *icon = entity.compare(0, 7, "switch.") == 0 ? "\uF011" : "\uF0EB";
+            lv_label_set_text_fmt(label, "%s  %s", icon, tile["label"].as<const char *>());
+            lv_obj_center(label);
+
+            // LVGL keeps the callback context for the lifetime of the button.
+            auto *target = new std::string(entity);
+            lv_obj_add_event_cb(button, [](lv_event_t *event) {
+              const auto *entity_id = static_cast<const std::string *>(lv_event_get_user_data(event));
+              id(toggle_home_entity).execute(*entity_id);
+            }, LV_EVENT_SHORT_CLICKED, target);
+            lv_obj_add_event_cb(button, [](lv_event_t *event) {
+              delete static_cast<std::string *>(lv_event_get_user_data(event));
+            }, LV_EVENT_DELETE, target);
+
+            api::global_api_server->subscribe_home_assistant_state(
+                entity, {}, [button](StringRef state) {
+                  if (state == "on") {
+                    lv_obj_add_state(button, LV_STATE_CHECKED);
+                  } else {
+                    lv_obj_remove_state(button, LV_STATE_CHECKED);
+                  }
+                });
+            ++index;
+          }
+
+          if (tiles.size() <= tiles_per_page) {
+            lv_obj_set_scroll_dir(pages, LV_DIR_NONE);
+          }
+
+script:
+  - id: toggle_home_entity
+    parameters:
+      entity_id: string
+    then:
+      - homeassistant.action:
+          action: homeassistant.toggle
+          data:
+            entity_id: !lambda return entity_id;
+
 lvgl:
   displays:
     - main_display
@@ -137,84 +247,27 @@ lvgl:
                   - lvgl.page.show: console_page
 
   pages:
-    # --- Home: toggle tiles -------------------------------------------------
+    # --- Home: swipe between 3-by-3 grids of toggle tiles --------------------
     - id: home_page
       pad_top: 62
       pad_bottom: 82
       pad_left: 12
       pad_right: 12
       scrollable: false
-      layout:
-        type: GRID
-        pad_row: 12
-        pad_column: 12
-        grid_rows: [FR(1), FR(1)]
-        grid_columns: [FR(1), FR(1)]
       widgets:
-        - button:
-            id: tile_1
-            checkable: true
-            grid_cell_row_pos: 0
-            grid_cell_column_pos: 0
-            grid_cell_x_align: STRETCH
-            grid_cell_y_align: STRETCH
-            widgets:
-              - label:
-                  align: CENTER
-                  text: "\uF0EB  ${tile_1_label}"
-            on_click:
-              - homeassistant.action:
-                  action: homeassistant.toggle
-                  data:
-                    entity_id: ${tile_1_entity}
-        - button:
-            id: tile_2
-            checkable: true
-            grid_cell_row_pos: 0
-            grid_cell_column_pos: 1
-            grid_cell_x_align: STRETCH
-            grid_cell_y_align: STRETCH
-            widgets:
-              - label:
-                  align: CENTER
-                  text: "\uF0EB  ${tile_2_label}"
-            on_click:
-              - homeassistant.action:
-                  action: homeassistant.toggle
-                  data:
-                    entity_id: ${tile_2_entity}
-        - button:
-            id: tile_3
-            checkable: true
-            grid_cell_row_pos: 1
-            grid_cell_column_pos: 0
-            grid_cell_x_align: STRETCH
-            grid_cell_y_align: STRETCH
-            widgets:
-              - label:
-                  align: CENTER
-                  text: "\uF011  ${tile_3_label}"
-            on_click:
-              - homeassistant.action:
-                  action: homeassistant.toggle
-                  data:
-                    entity_id: ${tile_3_entity}
-        - button:
-            id: tile_4
-            checkable: true
-            grid_cell_row_pos: 1
-            grid_cell_column_pos: 1
-            grid_cell_x_align: STRETCH
-            grid_cell_y_align: STRETCH
-            widgets:
-              - label:
-                  align: CENTER
-                  text: "\uF0EB  ${tile_4_label}"
-            on_click:
-              - homeassistant.action:
-                  action: homeassistant.toggle
-                  data:
-                    entity_id: ${tile_4_entity}
+        - tileview:
+            id: home_pages
+            width: 100%
+            height: 100%
+            pad_all: 0
+            border_width: 0
+            bg_opa: TRANSP
+            scrollbar_mode: AUTO
+            tiles:
+              - id: home_first_grid
+                row: 0
+                column: 0
+                dir: BOTTOM
 
     # --- Sensors: values from Home Assistant -------------------------------
     - id: sensors_page

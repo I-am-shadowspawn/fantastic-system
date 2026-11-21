@@ -4,39 +4,8 @@
 
 # --- Entities imported from Home Assistant ----------------------------------
 
-binary_sensor:
-  - platform: homeassistant
-    id: ha_tile_1
-    entity_id: ${tile_1_entity}
-    on_state:
-      - lvgl.widget.update:
-          id: tile_1
-          state:
-            checked: !lambda return x;
-  - platform: homeassistant
-    id: ha_tile_2
-    entity_id: ${tile_2_entity}
-    on_state:
-      - lvgl.widget.update:
-          id: tile_2
-          state:
-            checked: !lambda return x;
-  - platform: homeassistant
-    id: ha_tile_3
-    entity_id: ${tile_3_entity}
-    on_state:
-      - lvgl.widget.update:
-          id: tile_3
-          state:
-            checked: !lambda return x;
-  - platform: homeassistant
-    id: ha_tile_4
-    entity_id: ${tile_4_entity}
-    on_state:
-      - lvgl.widget.update:
-          id: tile_4
-          state:
-            checked: !lambda return x;
+api:
+  homeassistant_states: true
 
 sensor:
   - platform: homeassistant
