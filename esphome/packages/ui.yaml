@@ -35,8 +35,10 @@ esphome:
             }
           }
 
-          constexpr size_t columns = 3;
-          constexpr size_t tiles_per_page = columns * columns;
+          constexpr size_t columns = 5;
+          constexpr size_t rows = 3;
+
+          constexpr size_t tiles_per_page = columns * rows;
           static const int32_t tracks[] = {
             LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST
           };
