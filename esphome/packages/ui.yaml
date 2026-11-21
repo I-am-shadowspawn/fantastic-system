@@ -1,0 +1,400 @@
+# LVGL user interface: status bar, navigation bar and three pages
+#   Home    - toggle tiles bound to Home Assistant lights/switches
+#   Sensors - live values imported from Home Assistant
+#   Console - buttons that fire the "Console Button" event in Home Assistant
+#
+# Widgets are sized for an 800x480 panel.
+
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - main_touch
+  buffer_size: 25%
+  bg_color: 0x101418
+  text_color: 0xE0E0E0
+  text_font: montserrat_20
+
+  style_definitions:
+    - id: card_style
+      bg_color: 0x22282E
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+      pad_all: 12
+    - id: nav_button_style
+      bg_opa: TRANSP
+      border_width: 0
+      shadow_width: 0
+      text_font: montserrat_28
+
+  theme:
+    button:
+      bg_color: 0x22282E
+      bg_opa: COVER
+      radius: 16
+      border_width: 0
+      shadow_width: 0
+      text_color: 0xE0E0E0
+      checked:
+        bg_color: 0xF5A623
+        text_color: 0x101418
+
+  # Blank the screen after the configured idle time (see "Screen Timeout")
+  on_idle:
+    timeout: !lambda return (uint32_t) (id(screen_timeout).state * 1000);
+    then:
+      - if:
+          condition:
+            lambda: return id(screen_timeout).state > 0;
+          then:
+            - logger.log: "Screen idle - blanking"
+            - switch.turn_off: backlight
+            - lvgl.pause:
+
+  top_layer:
+    widgets:
+      # --- Status bar --------------------------------------------------------
+      - obj:
+          id: status_bar
+          align: TOP_MID
+          width: 100%
+          height: 50
+          radius: 0
+          bg_color: 0x1A1F24
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          widgets:
+            - label:
+                id: status_time
+                align: LEFT_MID
+                x: 16
+                text: "--:--"
+                text_font: montserrat_28
+            - label:
+                id: status_message
+                align: CENTER
+                width: 500
+                long_mode: DOT
+                text_align: CENTER
+                text: ""
+            - label:
+                id: status_connection
+                align: RIGHT_MID
+                x: -16
+                text: "\uF1EB"
+                text_color: 0xD0021B
+
+      # --- Navigation bar ----------------------------------------------------
+      - obj:
+          id: nav_bar
+          align: BOTTOM_MID
+          width: 100%
+          height: 70
+          radius: 0
+          bg_color: 0x1A1F24
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          layout:
+            type: FLEX
+            flex_flow: ROW
+            flex_align_main: SPACE_EVENLY
+            flex_align_cross: CENTER
+          widgets:
+            - button:
+                styles: nav_button_style
+                width: 200
+                height: 60
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "\uF015"
+                on_click:
+                  - lvgl.page.show: home_page
+            - button:
+                styles: nav_button_style
+                width: 200
+                height: 60
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "\uF00B"
+                on_click:
+                  - lvgl.page.show: sensors_page
+            - button:
+                styles: nav_button_style
+                width: 200
+                height: 60
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "\uF013"
+                on_click:
+                  - lvgl.page.show: console_page
+
+  pages:
+    # --- Home: toggle tiles -------------------------------------------------
+    - id: home_page
+      pad_top: 62
+      pad_bottom: 82
+      pad_left: 12
+      pad_right: 12
+      scrollable: false
+      layout:
+        type: GRID
+        pad_row: 12
+        pad_column: 12
+        grid_rows: [FR(1), FR(1)]
+        grid_columns: [FR(1), FR(1)]
+      widgets:
+        - button:
+            id: tile_1
+            checkable: true
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF0EB  ${tile_1_label}"
+            on_click:
+              - homeassistant.action:
+                  action: homeassistant.toggle
+                  data:
+                    entity_id: ${tile_1_entity}
+        - button:
+            id: tile_2
+            checkable: true
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF0EB  ${tile_2_label}"
+            on_click:
+              - homeassistant.action:
+                  action: homeassistant.toggle
+                  data:
+                    entity_id: ${tile_2_entity}
+        - button:
+            id: tile_3
+            checkable: true
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 0
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF011  ${tile_3_label}"
+            on_click:
+              - homeassistant.action:
+                  action: homeassistant.toggle
+                  data:
+                    entity_id: ${tile_3_entity}
+        - button:
+            id: tile_4
+            checkable: true
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 1
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "\uF0EB  ${tile_4_label}"
+            on_click:
+              - homeassistant.action:
+                  action: homeassistant.toggle
+                  data:
+                    entity_id: ${tile_4_entity}
+
+    # --- Sensors: values from Home Assistant -------------------------------
+    - id: sensors_page
+      pad_top: 62
+      pad_bottom: 82
+      pad_left: 12
+      pad_right: 12
+      scrollable: false
+      layout:
+        type: GRID
+        pad_column: 12
+        grid_rows: [FR(1)]
+        grid_columns: [FR(1), FR(1), FR(1)]
+      widgets:
+        - obj:
+            styles: card_style
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: TOP_MID
+                  text: "Indoor"
+              - label:
+                  id: temperature_value
+                  align: CENTER
+                  text_font: montserrat_48
+                  text: "--"
+        - obj:
+            styles: card_style
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: TOP_MID
+                  text: "Humidity"
+              - label:
+                  id: humidity_value
+                  align: CENTER
+                  text_font: montserrat_48
+                  text: "--"
+        - obj:
+            styles: card_style
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: TOP_MID
+                  text: "Outdoor"
+              - label:
+                  id: outdoor_temperature_value
+                  align: CENTER
+                  text_font: montserrat_48
+                  text: "--"
+
+    # --- Console: buttons that fire events in Home Assistant ---------------
+    - id: console_page
+      pad_top: 62
+      pad_bottom: 82
+      pad_left: 12
+      pad_right: 12
+      scrollable: false
+      layout:
+        type: GRID
+        pad_row: 12
+        pad_column: 12
+        grid_rows: [FR(1), FR(1)]
+        grid_columns: [FR(1), FR(1), FR(1)]
+      widgets:
+        - button:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 0
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 1"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_1
+        - button:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 1
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 2"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_2
+        - button:
+            grid_cell_row_pos: 0
+            grid_cell_column_pos: 2
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 3"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_3
+        - button:
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 0
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 4"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_4
+        - button:
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 1
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 5"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_5
+        - button:
+            grid_cell_row_pos: 1
+            grid_cell_column_pos: 2
+            grid_cell_x_align: STRETCH
+            grid_cell_y_align: STRETCH
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Scene 6"
+            on_click:
+              - event.trigger:
+                  id: console_event
+                  event_type: scene_6
+
+# Wake the screen on touch
+touchscreen:
+  - id: !extend main_touch
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - logger.log: "Touch - waking screen"
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - switch.turn_on: backlight
+
+# Keep the status bar clock and connection indicator up to date
+interval:
+  - interval: 5s
+    then:
+      - lvgl.label.update:
+          id: status_time
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid()) return std::string("--:--");
+            return now.strftime("%H:%M");
+      - if:
+          condition: api.connected
+          then:
+            - lvgl.label.update:
+                id: status_connection
+                text_color: 0x7ED321
+          else:
+            - lvgl.label.update:
+                id: status_connection
+                text_color: 0xD0021B

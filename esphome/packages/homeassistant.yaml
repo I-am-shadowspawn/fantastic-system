@@ -1,0 +1,110 @@
+# Home Assistant bindings: import entity states from Home Assistant into the
+# UI and expose console controls back to Home Assistant. All of this travels
+# over the single ESPHome native API integration.
+
+# --- Entities imported from Home Assistant ----------------------------------
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_tile_1
+    entity_id: ${tile_1_entity}
+    on_state:
+      - lvgl.widget.update:
+          id: tile_1
+          state:
+            checked: !lambda return x;
+  - platform: homeassistant
+    id: ha_tile_2
+    entity_id: ${tile_2_entity}
+    on_state:
+      - lvgl.widget.update:
+          id: tile_2
+          state:
+            checked: !lambda return x;
+  - platform: homeassistant
+    id: ha_tile_3
+    entity_id: ${tile_3_entity}
+    on_state:
+      - lvgl.widget.update:
+          id: tile_3
+          state:
+            checked: !lambda return x;
+  - platform: homeassistant
+    id: ha_tile_4
+    entity_id: ${tile_4_entity}
+    on_state:
+      - lvgl.widget.update:
+          id: tile_4
+          state:
+            checked: !lambda return x;
+
+sensor:
+  - platform: homeassistant
+    id: ha_temperature
+    entity_id: ${temperature_entity}
+    on_value:
+      - lvgl.label.update:
+          id: temperature_value
+          text:
+            format: "%.1f°"
+            args: [x]
+  - platform: homeassistant
+    id: ha_humidity
+    entity_id: ${humidity_entity}
+    on_value:
+      - lvgl.label.update:
+          id: humidity_value
+          text:
+            format: "%.0f%%"
+            args: [x]
+  - platform: homeassistant
+    id: ha_outdoor_temperature
+    entity_id: ${outdoor_temperature_entity}
+    on_value:
+      - lvgl.label.update:
+          id: outdoor_temperature_value
+          text:
+            format: "%.1f°"
+            args: [x]
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_message
+    entity_id: ${message_entity}
+    on_value:
+      - lvgl.label.update:
+          id: status_message
+          text: !lambda return x;
+
+# --- Entities exposed to Home Assistant -------------------------------------
+
+# Fired by the buttons on the "Console" page. In Home Assistant use the
+# "Console Button" event entity as an automation trigger and filter on the
+# event type (e.g. "scene_1").
+event:
+  - platform: template
+    id: console_event
+    name: Console Button
+    icon: mdi:gesture-tap-button
+    event_types:
+      - scene_1
+      - scene_2
+      - scene_3
+      - scene_4
+      - scene_5
+      - scene_6
+
+# Screen timeout, adjustable from Home Assistant (0 = never blank the screen)
+number:
+  - platform: template
+    id: screen_timeout
+    name: Screen Timeout
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 3600
+    step: 10
+    optimistic: true
+    restore_value: true
+    initial_value: ${idle_timeout}
