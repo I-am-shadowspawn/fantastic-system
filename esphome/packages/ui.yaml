@@ -63,7 +63,7 @@ lvgl:
           radius: 0
           bg_color: 0x1A1F24
           # The top layer does not inherit the active screen's text colour.
-          text_color: 0xE0E0E0
+          text_color: 0xFFFFFF
           border_width: 0
           pad_all: 0
           scrollable: false
@@ -86,7 +86,7 @@ lvgl:
                 align: RIGHT_MID
                 x: -16
                 text: "\uF1EB"
-                text_color: 0xD0021B
+                text_color: 0xFFFFFF
 
       # --- Navigation bar ----------------------------------------------------
       - obj:
