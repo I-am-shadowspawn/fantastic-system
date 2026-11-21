@@ -74,13 +74,13 @@ logger:
 # actions" in the device's integration options so the console buttons work.
 api:
   encryption:
-    key: !secret ha_console__encryption_key
+    key: !secret api_encryption_key
 
 # OTA updates are encrypted with the same Noise key as the API
 ota:
   - platform: esphome
     encryption:
-    
+      key: !secret api_encryption_key
 
 wifi:
   ssid: !secret wifi_ssid
