@@ -24,7 +24,7 @@ substitutions:
   hardware_package: esphome/packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
 
   # Seconds without a touch before the backlight is switched off (0 = never)
-  idle_timeout: "60"
+  idle_timeout: "0"
 
   # --- Home Assistant entities shown on the "Home" page -----------------------
   # In display order. Add or remove pairs as needed. Swipe up for the next 9.
@@ -48,7 +48,7 @@ packages:
   console:
     url: https://github.com/I-am-shadowspawn/fantastic-system
     ref: development
-    refresh: 1d
+    refresh: 1min
     files:
       - ${hardware_package}
       - esphome/packages/homeassistant.yaml
