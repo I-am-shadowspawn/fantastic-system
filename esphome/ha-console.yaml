@@ -1,7 +1,7 @@
 # =============================================================================
 # ESP32 HA Console - base template
 #
-# Turns a Waveshare ESP32-S3 touchscreen into an interactive dashboard /
+# Turns a Waveshare ESP32-P4-WIFI6-Touch-LCD-7B into an interactive dashboard /
 # console for Home Assistant. Everything talks to Home Assistant through the
 # single ESPHome (native API) integration - no MQTT, no extra add-ons.
 #
@@ -38,6 +38,6 @@ substitutions:
 
 packages:
   base: !include packages/base.yaml
-  hardware: !include packages/hardware/waveshare-esp32-s3-touch-lcd-4.3.yaml
+  hardware: !include packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
   homeassistant: !include packages/homeassistant.yaml
   ui: !include packages/ui.yaml

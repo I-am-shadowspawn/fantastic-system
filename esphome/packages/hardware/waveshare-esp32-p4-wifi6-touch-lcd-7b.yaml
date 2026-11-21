@@ -1,0 +1,67 @@
+# Waveshare ESP32-P4-WIFI6-Touch-LCD-7B: 1024x600 MIPI-DSI, GT911.
+# Wi-Fi is provided by the ESP32-C6 over ESP-Hosted SDIO.
+
+esphome:
+  min_version: 2026.11.0
+
+esp32:
+  board: esp32-p4-evboard
+  variant: esp32p4
+  flash_size: 32MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    advanced:
+      execute_from_psram: true
+      enable_idf_experimental_features: true
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+
+i2c:
+  - id: bus_a
+    sda: GPIO7
+    scl: GPIO8
+    frequency: 400kHz
+
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: gt911
+    id: main_touch
+    display: main_display
+    i2c_id: bus_a
+    update_interval: 50ms
+    transform:
+      mirror_x: true
+      mirror_y: true
+
+switch:
+  - platform: gpio
+    id: backlight
+    name: Backlight
+    icon: mdi:monitor
+    restore_mode: ALWAYS_ON
+    pin:
+      number: GPIO32
+      inverted: true

@@ -20,7 +20,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install ESPHome
-        run: pip install esphome
+        run: pip install esphome==2026.11.0
 
       - name: Create CI secrets
         working-directory: esphome
