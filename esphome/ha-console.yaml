@@ -67,7 +67,7 @@ esphome:
 
 logger:
   level: debug
-  hardware_uart: UART0
+  # hardware_uart: UART0
 
 # The single Home Assistant integration (ESPHome native API).
 # In Home Assistant, enable "Allow the device to perform Home Assistant
