@@ -6,7 +6,11 @@
 # single ESPHome (native API) integration - no MQTT, no extra add-ons.
 #
 # Adjust the substitutions below to match your device and your Home Assistant
-# entities, then flash with:   esphome run ha-console.yaml
+# entities, then Save -> Validate -> Install in ESPHome Device Builder.
+# Copy this file AND packages/ into the dashboard configuration folder.
+# Add the secrets from secrets.yaml.example using the dashboard Secrets editor.
+# First flash: P4 USB serial port; later updates: Install -> Wirelessly.
+# Full instructions: README.md in this folder.
 # =============================================================================
 
 substitutions:
@@ -14,6 +18,9 @@ substitutions:
   name: ha-console
   friendly_name: HA Console
   timezone: Europe/London
+
+  # Path relative to this file; keep the packages/ folder beside it.
+  hardware_package: packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
 
   # Seconds without a touch before the backlight is switched off (0 = never)
   idle_timeout: "60"
@@ -38,6 +45,6 @@ substitutions:
 
 packages:
   base: !include packages/base.yaml
-  hardware: !include packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
+  hardware: !include ${hardware_package}
   homeassistant: !include packages/homeassistant.yaml
   ui: !include packages/ui.yaml

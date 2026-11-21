@@ -39,6 +39,7 @@ the ids `main_display`, `main_touch` and `backlight` used by the UI.
 
 ```
 esphome/
+├── README.md                    # dashboard setup and troubleshooting
 ├── ha-console.yaml              # entry point – edit substitutions here
 ├── secrets.yaml.example         # copy to secrets.yaml
 └── packages/
@@ -50,38 +51,71 @@ esphome/
         └── waveshare-esp32-s3-touch-lcd-4.3.yaml
 ```
 
-## Getting started
+## Getting started — ESPHome dashboard (default)
 
-1. Install ESPHome 2026.11.0 or newer (`pip install esphome`) or use the
-   ESPHome Device Builder add-on. Before replacing stock firmware, make a
-   [stock backup](#stock-firmware-with-wi-fi-credentials) if you want to restore it.
-2. Create your secrets:
-   ```bash
-   cd esphome
-   cp secrets.yaml.example secrets.yaml
-   openssl rand -base64 32   # paste into api_encryption_key
-   ```
-   Set `wifi_ssid`, `wifi_password` and `fallback_ap_password` in `secrets.yaml`.
-3. Edit the `substitutions:` in `esphome/ha-console.yaml` – device name,
-   timezone and the Home Assistant entity IDs/labels you want on the screen.
-4. Connect the board over USB and flash it:
-   ```bash
-   esphome run ha-console.yaml
-   ```
-   Use the P4 USB serial port. Later updates can be done over the air.
-   ESPHome and the C6 must have compatible ESP-Hosted firmware; the original
-   C6 firmware's compatibility is not guaranteed. The P4 flash does not
-   update the C6. See the [ESPHome hosted firmware project](https://github.com/esphome/esp-hosted-firmware)
-   and Waveshare's instructions before changing the C6 firmware; keep a
-   compatible C6 image for stock recovery.
-5. In Home Assistant the device is auto-discovered under
-   **Settings → Devices & services → ESPHome**. Add it with the API encryption key.
-6. Open the device's integration options (**Configure**) and enable
-   **Allow the device to perform Home Assistant actions** – required for the
-   Home tiles to toggle entities.
+Use **ESPHome Device Builder** (the ESPHome dashboard) to configure, compile
+and flash the ESP32-P4. A terminal is not required for normal installation.
+Install or update Device Builder to **ESPHome 2026.11.0 or newer** using the
+[ESPHome installation guide](https://esphome.io/install/).
 
-The GT911 is polled and probes `0x5D` and then `0x14`. The display and touch
-orientation may need adjustment for your mounting. Wi-Fi uses 2.4 GHz.
+1. Before replacing stock firmware, see the optional
+   [stock backup instructions](#stock-firmware-with-wi-fi-credentials).
+2. Download this repository and copy **the contents of its `esphome/` folder**
+   into Device Builder's configuration folder, preserving `packages/` and
+   `packages/hardware/`. On Home Assistant OS this is normally
+   `/config/esphome/`, accessible through a file editor or network share.
+   Copy `ha-console.yaml` and `packages/`; do not copy a personal `secrets.yaml`
+   or experimental device YAML files from another checkout.
+3. In Device Builder, open **Secrets**. Merge the four keys from
+   `esphome/secrets.yaml.example` into the existing secrets file and fill them
+   in. Do not replace secrets used by other devices. For the API encryption
+   key, create a temporary device in the dashboard and copy its generated
+   `api.encryption.key` before deleting that temporary configuration. Use a
+   separate random password of at least eight characters for the fallback AP.
+4. Open **Edit** on the `ha-console` card. Set the device name, timezone and
+   Home Assistant entity IDs/labels in `substitutions:`. The default hardware
+   package selects the Waveshare ESP32-P4-WIFI6-Touch-LCD-7B. Save, then choose
+   **Validate** from the card menu and resolve any errors before installing.
+5. Connect the **P4 USB serial port** using a data cable. Select **Install**:
+   - If USB is attached to the computer running your browser, choose
+     **Plug into this computer**. Use Chrome or Edge with Web Serial support
+     and a secure dashboard connection (HTTPS or localhost).
+   - If USB is attached to the Device Builder host, choose
+     **Plug into the computer running ESPHome Device Builder** and select
+     the P4 serial port (the wording can vary with dashboard version).
+   - If browser flashing is unavailable, choose **Manual download**, select
+     the factory format for first installation, then use
+     [ESPHome Web](https://web.esphome.io/) in Chrome or Edge to install that
+     downloaded image through the P4 USB port.
+6. After flashing, let the board restart and join your 2.4 GHz Wi-Fi network.
+   For subsequent updates, select **Install → Wirelessly** on its dashboard
+   card. Initial installation requires USB; wireless updates require working
+   ESPHome firmware and network connectivity.
+7. In Home Assistant, add the discovered device under
+   **Settings → Devices & services → ESPHome**, supplying the API encryption
+   key when requested. Open its integration options (**Configure**) and enable
+   **Allow the device to perform Home Assistant actions** for tile controls.
+
+See [the configuration guide](esphome/README.md) for the destination folder
+layout and troubleshooting. Local package includes work in Device Builder;
+`ha-console.yaml` alone is not a complete configuration.
+
+ESPHome and the C6 must have compatible ESP-Hosted firmware; compatibility
+with the original C6 firmware is not guaranteed. Flashing the P4 does not
+update the C6. See the [ESPHome hosted firmware project](https://github.com/esphome/esp-hosted-firmware)
+and Waveshare's instructions before changing the C6 firmware; keep a
+compatible C6 image for stock recovery.
+
+The GT911 is polled and probes `0x5D` and then `0x14`. Display and touch
+orientation may need adjustment for your mounting.
+
+### Optional command line installation
+
+Advanced users can still install ESPHome locally, copy
+`esphome/secrets.yaml.example` to `esphome/secrets.yaml`, fill in the secrets,
+and run `esphome run ha-console.yaml` from the repository's `esphome/` folder.
+Use the same minimum ESPHome version and P4 USB port as the dashboard method.
+The stock backup/recovery commands below are a separate optional workflow.
 
 ### Stock firmware with Wi-Fi credentials
 
