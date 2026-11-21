@@ -1,0 +1,59 @@
+# Common ESPHome core: connectivity, Home Assistant API, OTA and diagnostics.
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  project:
+    name: i-am-shadowspawn.ha-console
+    version: "0.1.0"
+
+logger:
+  level: INFO
+
+# The single Home Assistant integration (ESPHome native API).
+# In Home Assistant, enable "Allow the device to perform Home Assistant
+# actions" in the device's integration options so the console buttons work.
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# OTA updates are encrypted with the same Noise key as the API
+ota:
+  - platform: esphome
+    encryption:
+      key: !secret api_encryption_key
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: ${friendly_name} Fallback
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: ${timezone}
+
+sensor:
+  - platform: wifi_signal
+    name: WiFi Signal
+    id: wifi_rssi
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: Uptime
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: IP Address
+      entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: Restart
+    entity_category: config

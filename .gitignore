@@ -1,0 +1,6 @@
+# ESPHome
+esphome/secrets.yaml
+esphome/.esphome/
+.esphome/
+**/.pioenvs/
+**/.piolibdeps/
