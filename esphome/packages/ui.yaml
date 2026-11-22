@@ -1,4 +1,4 @@
-# LVGL user interface: status bar, navigation bar and four pages
+# LVGL user interface: status bar, navigation bar and five pages
 #   Home    - toggle tiles bound to Home Assistant lights/switches
 #   Sensors - live values imported from Home Assistant
 #   Console - buttons that fire the "Console Button" event in Home Assistant
@@ -193,12 +193,25 @@ lvgl:
           pad_all: 0
           scrollable: false
           widgets:
-            - label:
-                id: status_time
+            - button:
+                id: status_time_button
                 align: LEFT_MID
-                x: 16
-                text: "--:--"
-                text_font: montserrat_28
+                x: 4
+                width: 120
+                height: 48
+                bg_opa: TRANSP
+                border_width: 0
+                shadow_width: 0
+                widgets:
+                  - label:
+                      id: status_time
+                      align: CENTER
+                      text: "--:--"
+                      text_font: montserrat_28
+                on_click:
+                  - script.execute:
+                      id: device_overlay_open
+                      mode: 2
             - label:
                 id: status_message
                 align: CENTER
@@ -206,12 +219,24 @@ lvgl:
                 long_mode: DOT
                 text_align: CENTER
                 text: ""
-            - label:
-                id: status_connection
+            - button:
                 align: RIGHT_MID
-                x: -16
-                text: "\uF1EB"
-                text_color: 0xFFFFFF
+                x: -4
+                width: 64
+                height: 48
+                bg_opa: TRANSP
+                border_width: 0
+                shadow_width: 0
+                widgets:
+                  - label:
+                      id: status_connection
+                      align: CENTER
+                      text: "\uF1EB"
+                      text_color: 0xFFFFFF
+                on_click:
+                  - script.execute:
+                      id: device_overlay_open
+                      mode: 1
 
       # --- Navigation bar ----------------------------------------------------
       - obj:
@@ -232,7 +257,7 @@ lvgl:
           widgets:
             - button:
                 styles: nav_button_style
-                width: 23%
+                width: 18%
                 height: 60
                 widgets:
                   - label:
@@ -242,7 +267,7 @@ lvgl:
                   - lvgl.page.show: home_page
             - button:
                 styles: nav_button_style
-                width: 23%
+                width: 18%
                 height: 60
                 widgets:
                   - label:
@@ -252,7 +277,7 @@ lvgl:
                   - lvgl.page.show: sensors_page
             - button:
                 styles: nav_button_style
-                width: 23%
+                width: 18%
                 height: 60
                 widgets:
                   - label:
@@ -263,7 +288,7 @@ lvgl:
 
             - button:
                 styles: nav_button_style
-                width: 23%
+                width: 18%
                 height: 60
                 widgets:
                   - label:
@@ -272,6 +297,18 @@ lvgl:
                       text_font: montserrat_20
                 on_click:
                   - lvgl.page.show: heating_page
+
+            - button:
+                styles: nav_button_style
+                width: 18%
+                height: 60
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "\uF05A"
+                      text_font: device_icons
+                on_click:
+                  - lvgl.page.show: info_page
 
   pages:
     # --- Home: swipe between 5-column, 3-row grids of toggle tiles -----------

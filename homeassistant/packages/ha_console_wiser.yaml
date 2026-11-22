@@ -11,9 +11,18 @@ script:
           # DEVICE_ID: {boost_entity: button.example, cancel_entity: button.example,
           #             status_entity: switch.example}
           hot_water_overrides: {}
+          # Optional climate entity -> list of battery sensors. Overrides area matching.
+          # climate.wiser_lounge: [sensor.lounge_trv_battery, sensor.lounge_stat_battery]
+          room_battery_entities: {}
           snapshot: >-
             {%- set wiser = integration_entities('wiser') | list -%}
             {%- set ns = namespace(rooms=[], water=[], devices=[]) -%}
+            {%- set room_entities = namespace(items=[]) -%}
+            {%- for e in wiser if e.startswith('climate.') -%}
+              {%- if state_attr(e, 'heating_type') is not none or device_attr(device_id(e), 'model') == 'Room' -%}
+                {%- set room_entities.items = room_entities.items + [e] -%}
+              {%- endif -%}
+            {%- endfor -%}
             {%- for entity in wiser -%}
               {%- set dev = device_id(entity) -%}
               {%- if dev and device_attr(dev, 'model') == 'Hot Water' and dev not in ns.devices -%}
@@ -22,6 +31,27 @@ script:
               {%- if entity.startswith('climate.') and
                     (state_attr(entity, 'heating_type') is not none or
                      (dev and device_attr(dev, 'model') == 'Room')) -%}
+                {%- set room_area = area_id(entity) -%}
+                {%- set hub = config_entry_id(entity) -%}
+                {%- set peers = namespace(count=0) -%}
+                {%- for e in room_entities.items if area_id(e) == room_area and config_entry_id(e) == hub -%}
+                  {%- set peers.count = peers.count + 1 -%}
+                {%- endfor -%}
+                {%- set battery = namespace(values=[]) -%}
+                {%- set has_override = entity in room_battery_entities -%}
+                {%- set explicit = room_battery_entities.get(entity) -%}
+                {%- set valid_override = explicit is sequence and explicit is not string and explicit is not mapping -%}
+                {%- set candidates = explicit if valid_override else [] if has_override else wiser -%}
+                {%- for b in candidates if b in wiser and b.startswith('sensor.') -%}
+                  {%- set same_room = room_area and peers.count == 1 and area_id(b) == room_area and
+                      device_attr(device_id(b), 'model') in ['iTRV', 'RoomStat'] -%}
+                  {%- if hub and config_entry_id(b) == hub and
+                        (has_override or same_room) and
+                        state_attr(b, 'device_class') == 'battery' and state_attr(b, 'unit_of_measurement') == '%' and
+                        is_number(states(b)) and 0 <= states(b) | float <= 100 -%}
+                    {%- set battery.values = battery.values + [states(b) | float] -%}
+                  {%- endif -%}
+                {%- endfor -%}
                 {%- set presets = state_attr(entity, 'preset_modes') or [] -%}
                 {%- set cancel = namespace(value='') -%}
                 {%- for preset in presets -%}
@@ -35,7 +65,8 @@ script:
                 {%- set hi = state_attr(entity, 'max_temp') -%}
                 {%- set step = state_attr(entity, 'target_temp_step') | float(0.5) -%}
                 {%- set ns.rooms = ns.rooms + [dict(
-                    id=entity, entity=entity, kind='room', name=state_attr(entity, 'friendly_name') or entity,
+                    id=entity, entity=entity, kind='room', name=state_attr(entity, 'name') or area_name(entity) or state_attr(entity, 'friendly_name') or entity,
+                    battery_percent=battery.values | min if battery.values else none,
                     available=available, current=state_attr(entity, 'current_temperature'), target=target,
                     minimum=lo, maximum=hi, step=step, unit=state_attr(entity, 'temperature_unit') or '°C',
                     heating=state_attr(entity, 'is_heating'), boosted=state_attr(entity, 'is_boosted'),

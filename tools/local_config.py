@@ -19,7 +19,8 @@ includes = f'packages:\n  hardware: !include packages/hardware/{board}.yaml\n'
 if configuration != 'recovery':
     includes += ('  homeassistant: !include packages/homeassistant.yaml\n'
                  '  ui: !include packages/ui.yaml\n'
-                 '  heating: !include packages/heating.yaml\n')
+                 '  heating: !include packages/heating.yaml\n'
+                 '  device_info: !include packages/device_info.yaml\n')
 if configuration == 'p4-c6':
     includes += '  c6_maintenance: !include packages/c6-maintenance.yaml\n'
 source, count = re.subn(r'^packages:\n.*?(?=^# Keep connectivity|^esphome:)',

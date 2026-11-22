@@ -252,7 +252,7 @@ script:
             std::string key, name, unit;
             bool editable = false, boostable = false, cancelable = false;
             float target = 0, minimum = 0, maximum = 0, step = 0.5;
-            lv_obj_t *name_label, *current_label, *target_button, *target_label;
+            lv_obj_t *name_label, *flame, *battery_label, *current_label, *target_button, *target_label;
             lv_obj_t *status_label, *boost_button, *cancel_button;
           };
           static std::vector<Card *> cards;
@@ -279,6 +279,10 @@ script:
               lv_obj_add_state(card->target_button, LV_STATE_DISABLED);
               lv_obj_add_state(card->boost_button, LV_STATE_DISABLED);
               lv_obj_add_state(card->cancel_button, LV_STATE_DISABLED);
+              lv_obj_remove_state(card->boost_button, LV_STATE_CHECKED);
+              lv_obj_set_hidden(card->flame, true);
+              lv_label_set_text(card->battery_label, "\uF244 --");
+              lv_obj_set_style_text_color(card->battery_label, lv_color_hex(0x889099), 0);
             }
             lv_obj_set_hidden(id(heating_dialog), true);
             lv_label_set_text(id(heating_notice), "Wiser controls disabled in Home Assistant");
@@ -342,7 +346,7 @@ script:
                                   LV_GRID_ALIGN_STRETCH, cell / columns, 1);
               lv_obj_set_scrollable(box, false);
               lv_obj_set_style_pad_all(box, 6, 0);
-              lv_obj_set_style_pad_row(box, 2, 0);
+              lv_obj_set_style_pad_row(box, 1, 0);
               lv_obj_set_style_radius(box, 12, 0);
               lv_obj_set_style_border_width(box, 0, 0);
               lv_obj_set_style_bg_color(box, lv_color_hex(0x22282E), 0);
@@ -372,14 +376,35 @@ script:
                 lv_obj_center(caption);
                 return obj;
               };
-              card->name_label = label(box);
+              auto row = [](lv_obj_t *parent, int height) {
+                auto *obj = lv_obj_create(parent);
+                lv_obj_set_size(obj, lv_pct(100), height);
+                lv_obj_set_style_pad_all(obj, 0, 0);
+                lv_obj_set_style_border_width(obj, 0, 0);
+                lv_obj_set_style_bg_opa(obj, LV_OPA_TRANSP, 0);
+                lv_obj_set_scrollable(obj, false);
+                lv_obj_set_flex_flow(obj, LV_FLEX_FLOW_ROW);
+                lv_obj_set_flex_align(obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+                return obj;
+              };
+              auto *header = row(box, 24);
+              card->name_label = label(header);
+              lv_obj_set_width(card->name_label, 0);
+              lv_obj_set_flex_grow(card->name_label, 1);
+              card->flame = lv_label_create(header);
+              lv_obj_set_width(card->flame, 24);
+              lv_obj_set_style_text_font(card->flame, id(device_icons).get_lv_font(), 0);
+              lv_obj_set_style_text_color(card->flame, lv_color_hex(0xF44336), 0);
+              lv_label_set_text(card->flame, "\uF06D");
+              lv_obj_set_hidden(card->flame, true);
               card->current_label = label(box);
               lv_obj_set_style_text_font(card->current_label, &lv_font_montserrat_20, 0);
               card->target_button = button(box, "--");
               lv_obj_set_width(card->target_button, lv_pct(100));
               card->target_label = lv_obj_get_child(card->target_button, 0);
-              card->status_label = label(box);
-              // Extra vertical space is absorbed above the action buttons.
+              // Keep the footer at the bottom without overlapping the controls.
+              auto *spacer = row(box, 0);
+              lv_obj_set_flex_grow(spacer, 1);
               auto *actions = lv_obj_create(box);
               lv_obj_set_width(actions, lv_pct(100));
               lv_obj_set_height(actions, button_height);
@@ -393,6 +418,15 @@ script:
               card->cancel_button = button(actions, "Cancel");
               lv_obj_set_flex_grow(card->boost_button, 1);
               lv_obj_set_flex_grow(card->cancel_button, 1);
+              lv_obj_set_style_bg_color(card->boost_button, lv_color_hex(0x2E7D32), LV_STATE_CHECKED);
+              auto *footer = row(box, 20);
+              card->status_label = label(footer);
+              lv_obj_set_width(card->status_label, 0);
+              lv_obj_set_flex_grow(card->status_label, 1);
+              lv_obj_set_style_text_align(card->status_label, LV_TEXT_ALIGN_LEFT, 0);
+              card->battery_label = label(footer);
+              lv_obj_set_width(card->battery_label, 80);
+              lv_obj_set_style_text_align(card->battery_label, LV_TEXT_ALIGN_RIGHT, 0);
               lv_obj_add_event_cb(card->target_button, [](lv_event_t *event) {
                 auto *c = static_cast<Card *>(lv_event_get_user_data(event));
                 if (!c->editable) return;
@@ -459,6 +493,25 @@ script:
             else if (!(item["available"] | false)) lv_label_set_text(c->status_label, "Unavailable");
             else if (item["heating"].is<bool>()) lv_label_set_text(c->status_label, item["heating"].as<bool>() ? "Heating" : "Idle");
             else lv_label_set_text(c->status_label, "Status unknown");
+            const bool state_known = fresh && (item["available"] | false);
+            if (state_known && (item["boosted"] | false)) lv_obj_add_state(c->boost_button, LV_STATE_CHECKED);
+            else lv_obj_remove_state(c->boost_button, LV_STATE_CHECKED);
+            lv_obj_set_hidden(c->flame, !(state_known && (item["heating"] | false)));
+            const bool battery_valid = item["battery_percent"].is<float>() &&
+                std::isfinite(item["battery_percent"].as<float>()) &&
+                item["battery_percent"].as<float>() >= 0 && item["battery_percent"].as<float>() <= 100;
+            const bool room_card = std::string(item["kind"] | "") == "room";
+            lv_obj_set_hidden(c->battery_label, !room_card && !battery_valid);
+            if (state_known && battery_valid) {
+              const float percent = item["battery_percent"].as<float>();
+              const char *glyph = percent <= 0 ? "\uF244" : percent <= 25 ? "\uF243" :
+                                  percent <= 50 ? "\uF242" : percent <= 75 ? "\uF241" : "\uF240";
+              lv_label_set_text_fmt(c->battery_label, "%s %.0f%%", glyph, percent);
+              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(percent <= 20 ? 0xF44336 : 0xE0E0E0), 0);
+            } else {
+              lv_label_set_text(c->battery_label, "\uF244 --");
+              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(0x889099), 0);
+            }
             set_enabled(c->target_button, c->editable);
             set_enabled(c->boost_button, c->boostable);
             set_enabled(c->cancel_button, c->cancelable);

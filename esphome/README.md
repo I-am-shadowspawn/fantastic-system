@@ -392,3 +392,87 @@ Compilation and software tests do not prove a successful C6 update. Physical
 acceptance requires matching host/C6 versions, no mismatch/staging errors, at
 least 30 minutes without watchdog resets, working Heating discovery, and a
 successful normal OTA upload. Firmware is not installed by these checks.
+
+## Heating status indicators and room batteries
+
+Heating cards use the Wiser room's plain `name` attribute, falling back to the
+HA area name and then the entity label. An active boost makes the Boost button
+green. A red flame in the header means HA reports active heating, independently
+of boost. Stale/unavailable heating state hides the flame and clears the green
+boost indication rather than implying the device is still heating.
+
+The footer shows the lowest valid battery percentage among the room's radiator
+valves (`iTRV`) and thermostat (`RoomStat`), with a five-level battery icon.
+Values at or below 20% are red. Automatic association requires one Wiser room
+per HA area within the same Wiser integration entry/hub. Devices from other
+hubs or non-heating equipment in the same area are excluded. Missing or stale
+room battery information is shown in grey as `--`, not as zero. Hot water cards
+without battery information omit the icon.
+
+For unusual area assignments or ambiguous rooms, edit `room_battery_entities`
+in the HA snapshot script, then Reload Scripts:
+
+```yaml
+room_battery_entities:
+  climate.wiser_lounge:
+    - sensor.lounge_trv_battery
+    - sensor.lounge_thermostat_battery
+```
+
+Overrides must still identify valid battery percentage sensors belonging to
+the same Wiser integration entry. An empty list explicitly disables battery
+association for that room. The displayed value is whatever percentage HA
+reports; the console does not estimate a new percentage from voltage.
+
+Update **both** `homeassistant/packages/ha_console_wiser.yaml` in HA and the
+console firmware for the new labels and battery data. The snapshot change is
+additive (`battery_percent` is optional); old snapshots remain usable and show
+unknown battery information until the HA script is updated.
+
+## Info page and top-bar overlays
+
+The circled Info icon at the far right of the navigation bar opens a scrollable
+local diagnostics page. It shows firmware/ESPHome versions, build timestamp
+with its build-machine timezone offset, uptime, boots for the current build,
+last reset reason, and Wi-Fi details. Normal configurations now include
+`esphome/packages/device_info.yaml`; add this file to existing remote-package
+lists, or include `packages/device_info.yaml` in local configurations.
+
+The boot count starts at **1** for each new build identity (build timestamp plus
+configuration/version fingerprint). Each subsequent boot that reaches early
+diagnostic initialization increments it. Reflashing an identical image keeps
+its count; a newly compiled image resets it. The record is saved once per boot
+and flushed immediately, so short crash cycles are captured without periodic
+flash writes. If saving fails, the displayed count is marked `not saved`.
+Wiping preferences also starts a new count. Resets before initialization cannot
+be counted by application firmware.
+
+Reset reasons distinguish power-on, the reset pin, manual restart requests,
+watchdogs, panic and brownout where the platform can identify them. Generic
+software restarts are labelled `source unknown`; a power-on reason does not
+prove that the preceding shutdown was orderly. ESPHome's reboot-source details
+are retained for other component-requested restarts.
+
+Tap the Wi-Fi icon for connection status, SSID, IPv4 address, gateway, hostname,
+signal strength and HA API connectivity. Wi-Fi and HA connectivity are reported
+separately. Signal uses the existing 60-second RSSI samples, with qualitative
+levels Strong (at least -60 dBm), Good (-61 to -70), Weak (-71 to -80), or Poor
+(below -80). Other network details come from local cached/netif state; opening
+these views does not initiate Wi-Fi scans or HA/Wiser queries.
+
+Tap the top-bar clock for the full local date/time, timezone/UTC offset, last
+successful Home Assistant time synchronization and its elapsed age. This age
+is measured with a 64-bit monotonic clock, so wall-clock corrections and daylight
+saving changes do not distort it. Before the first successful HA sync, the view
+says `Not synchronized this boot`. It measures synchronization age, not clock
+accuracy or a separate hardware calibration.
+
+Both overlays have a Close button, block touches on the background and reveal
+the same page/scroll position when closed. Timers update only visible diagnostic
+views; the new views do not change the deferred Wiser rendering or polling
+limits. Native OTA suspension also pauses these diagnostic view updates.
+
+The two new flame/info glyphs use the pinned Font Awesome Free 6.7.2 font.
+The build computer needs Internet access to download it initially; the panel
+does not download fonts. Upstream licensing is retained in
+[`licenses/fontawesome-free-6.7.2.txt`](../licenses/fontawesome-free-6.7.2.txt).

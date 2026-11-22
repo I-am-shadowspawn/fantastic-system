@@ -13,11 +13,13 @@ integration. No MQTT broker, custom component or add-on is required.
 |------|--------------|
 | **Home** | 4 toggle tiles bound to HA lights/switches. Tile state follows HA; tapping calls `homeassistant.toggle`. |
 | **Sensors** | Live indoor temperature, humidity and outdoor temperature imported from HA. |
-| **Heating** | Discovered Wiser heating rooms and hot water; temperatures, room target editing, boost and cancellation. |
+| **Heating** | Wiser rooms and hot water; temperatures, targets, boost, heating flame and room battery indicators. |
+| **Info** | Build/version, uptime, boot count/reset reason and local Wi-Fi details. |
 | **Console** | 6 buttons that fire a **Console Button** event entity in HA – use them to trigger any automation/scene/script. |
 
 Always visible: status bar (clock from HA, message from an `input_text`,
-HA connection indicator) and a navigation bar.
+HA connection indicator) and a navigation bar. Tap the clock or Wi-Fi icon for
+a closable date/time or connection overlay.
 
 Entities exposed to Home Assistant:
 
@@ -47,6 +49,7 @@ esphome/
     ├── base.yaml                # WiFi, API, OTA, logger, time, diagnostics
     ├── homeassistant.yaml       # HA entity imports + entities exposed to HA
     ├── heating.yaml             # Wiser cards, target dialog and HA script calls
+    ├── device_info.yaml         # Info page, persistent boot count and overlays
     ├── ui.yaml                  # LVGL pages, status/nav bar, screen timeout
     └── hardware/
         ├── waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml

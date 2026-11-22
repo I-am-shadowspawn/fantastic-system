@@ -1,0 +1,257 @@
+# Local diagnostics and modal views for the normal console (ui + heating packages).
+# Font Awesome Free icons, pinned release; only these two glyphs are compiled in.
+font:
+  - file: https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.7.2/webfonts/fa-solid-900.ttf
+    id: device_icons
+    size: 22
+    glyphs: ["\uF06D", "\uF05A"]
+
+globals:
+  - id: device_boot_count
+    type: uint32_t
+    initial_value: '0'
+  - id: device_boot_count_saved
+    type: bool
+    initial_value: 'false'
+  - id: device_overlay_mode
+    type: uint8_t
+    initial_value: '0'
+  - id: device_time_synced
+    type: bool
+    initial_value: 'false'
+  - id: device_last_sync_ms
+    type: uint64_t
+    initial_value: '0'
+  - id: device_last_sync_epoch
+    type: time_t
+    initial_value: '0'
+
+esphome:
+  on_boot:
+    priority: 300
+    then:
+      - lambda: |-
+          // One atomic preference record and one flash flush per boot, before
+          // Wi-Fi starts. Identical-image reflashes keep their boot count.
+          struct BootRecord { uint32_t format; uint32_t count; uint64_t build; };
+          const uint64_t fingerprint = (uint64_t(App.get_config_version_hash()) << 32) ^ uint64_t(App.get_build_time());
+          auto pref = global_preferences->make_preference<BootRecord>(
+              fnv1_hash("console_boot_record_v1") ^ fnv1_hash(App.get_name().c_str()));
+          BootRecord record{};
+          if (!pref.load(&record) || record.format != 1 || record.build != fingerprint) {
+            record = {1, 1, fingerprint};
+          } else if (record.count < UINT32_MAX) {
+            ++record.count;
+          }
+          id(device_boot_count) = record.count;
+          id(device_boot_count_saved) = pref.save(&record) && global_preferences->sync();
+          if (!id(device_boot_count_saved)) ESP_LOGW("device_info", "Boot count could not be saved");
+
+time:
+  - id: !extend ha_time
+    on_time_sync:
+      - lambda: |-
+          if (id(ha_time).now().is_valid()) {
+            id(device_time_synced) = true;
+            id(device_last_sync_ms) = millis_64();
+            id(device_last_sync_epoch) = id(ha_time).now().timestamp;
+          }
+
+text_sensor:
+  - platform: wifi_info
+    ssid:
+      id: device_wifi_ssid
+      internal: true
+  - platform: debug
+    reset_reason:
+      id: device_reset_reason
+      name: Last Boot Reason
+      entity_category: diagnostic
+
+script:
+  - id: device_overlay_open
+    mode: restart
+    parameters:
+      mode: int
+    then:
+      - lambda: |-
+          if (mode != 1 && mode != 2) return;
+          id(device_overlay_mode) = mode;
+          lv_label_set_text(id(device_overlay_title), mode == 1 ? "Wi-Fi information" : "Date and time");
+          lv_obj_set_hidden(id(device_overlay), false);
+      - script.execute: device_info_render
+
+  - id: device_overlay_close
+    then:
+      - lambda: |-
+          id(device_overlay_mode) = 0;
+          lv_obj_set_hidden(id(device_overlay), true);
+
+  - id: device_info_render
+    then:
+      - lambda: |-
+          // No HA requests or extra radio RSSI polls. Wi-Fi metadata comes from
+          // local netif/cached sensors; only visible views are updated.
+          if (id(heating_ota_active)) return;
+          const bool info_visible = id(device_overlay_mode) == 0 && lv_screen_active() == id(info_page)->obj;
+          if (!info_visible && id(device_overlay_mode) == 0) return;
+          auto set_text = [](lv_obj_t *label, const std::string &text) {
+            if (text != lv_label_get_text(label)) lv_label_set_text(label, text.c_str());
+          };
+          auto duration = [](uint64_t milliseconds) {
+            const uint64_t seconds = milliseconds / 1000;
+            char buffer[64];
+            snprintf(buffer, sizeof(buffer), "%llud %02u:%02u:%02u",
+                     (unsigned long long) (seconds / 86400), unsigned(seconds / 3600 % 24),
+                     unsigned(seconds / 60 % 60), unsigned(seconds % 60));
+            return std::string(buffer);
+          };
+          if (info_visible || id(device_overlay_mode) == 1) {
+            const bool connected = wifi::global_wifi_component->is_connected();
+            std::string ip = "--", gateway = "--";
+            if (connected) {
+              auto *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+              esp_netif_ip_info_t addresses{};
+              if (netif != nullptr && esp_netif_get_ip_info(netif, &addresses) == ESP_OK) {
+                char buffer[network::IP_ADDRESS_BUFFER_SIZE];
+                if (addresses.ip.addr != 0) ip = network::IPAddress(&addresses.ip).str_to(buffer);
+                if (addresses.gw.addr != 0) gateway = network::IPAddress(&addresses.gw).str_to(buffer);
+              }
+            }
+            std::string signal = "--";
+            if (connected && id(wifi_rssi).has_state() && std::isfinite(id(wifi_rssi).state)) {
+              const float rssi = id(wifi_rssi).state;
+              const char *quality = rssi >= -60 ? "Strong" : rssi >= -70 ? "Good" : rssi >= -80 ? "Weak" : "Poor";
+              char buffer[48];
+              snprintf(buffer, sizeof(buffer), "%.0f dBm (%s)", rssi, quality);
+              signal = buffer;
+            }
+            const std::string ssid = connected && !id(device_wifi_ssid).state.empty() ? id(device_wifi_ssid).state : "--";
+            const std::string text = std::string("Wi-Fi: ") + (connected ? "Connected" : "Disconnected") +
+                "\nSSID: " + ssid + "\nIP: " + ip + "\nGateway: " + gateway +
+                "\nHostname: " + App.get_name().c_str() + "\nSignal: " + signal +
+                "\nHA API: " + (!id(heating_ha_clients).empty() ? "Connected" : "Disconnected");
+            set_text(info_visible ? id(info_wifi_values) : id(device_overlay_values), text);
+          }
+          if (info_visible) {
+            static const std::string build = []() {
+              char timestamp[Application::BUILD_TIME_STR_SIZE];
+              App.get_build_time_string(timestamp);
+              return std::string("Firmware: ") + ESPHOME_PROJECT_VERSION + "\nESPHome: " + ESPHOME_VERSION + "\nBuild: " + timestamp;
+            }();
+            set_text(id(info_build_values), build);
+            std::string reason = id(device_reset_reason).has_state() ? id(device_reset_reason).state : "Unknown";
+            if (reason == "power-on event") reason = "Power-on";
+            else if (reason == "external pin") reason = "External reset pin";
+            else if (reason.rfind("Reboot request from restart", 0) == 0) reason = "Manual restart request";
+            else if (reason == "software via esp_restart") reason = "Software restart (source unknown)";
+            set_text(id(info_boot_values), "Uptime: " + duration(millis_64()) +
+                "\nBoots this build: " + std::to_string(id(device_boot_count)) +
+                (id(device_boot_count_saved) ? "" : " (not saved)") + "\nLast boot: " + reason);
+          }
+          if (id(device_overlay_mode) == 2) {
+            auto now = id(ha_time).now();
+            std::string text = now.is_valid() ? now.strftime("%A %d %B %Y\n%H:%M:%S %z") : "Waiting for Home Assistant time";
+            text += "\nTimezone: ${timezone}";
+            if (id(device_time_synced)) {
+              auto sync = ESPTime::from_epoch_local(id(device_last_sync_epoch));
+              text += "\nLast HA sync: " + sync.strftime("%Y-%m-%d %H:%M:%S %z");
+              text += "\nSince sync: " + duration(millis_64() - id(device_last_sync_ms));
+            } else {
+              text += "\nNot synchronized this boot";
+            }
+            set_text(id(device_overlay_values), text);
+          }
+
+interval:
+  - interval: 1s
+    then:
+      - script.execute: device_info_render
+
+lvgl:
+  top_layer:
+    widgets:
+      - obj:
+          id: device_overlay
+          hidden: true
+          align: CENTER
+          width: 100%
+          height: 100%
+          bg_color: 0x000000
+          bg_opa: 70%
+          pad_all: 12
+          radius: 0
+          border_width: 0
+          scrollable: false
+          widgets:
+            - obj:
+                align: CENTER
+                width: 94%
+                height: 94%
+                bg_color: 0x22282E
+                text_color: 0xFFFFFF
+                pad_all: 16
+                layout:
+                  type: FLEX
+                  flex_flow: COLUMN
+                  pad_row: 12
+                widgets:
+                  - label:
+                      id: device_overlay_title
+                      text: Information
+                      text_font: montserrat_28
+                  - obj:
+                      width: 100%
+                      height: 0
+                      flex_grow: 1
+                      bg_opa: TRANSP
+                      border_width: 0
+                      pad_all: 0
+                      scroll_dir: VER
+                      widgets:
+                        - label:
+                            id: device_overlay_values
+                            width: 100%
+                            long_mode: WRAP
+                            text: '--'
+                  - button:
+                      width: 100%
+                      height: 52
+                      widgets:
+                        - label:
+                            align: CENTER
+                            text: Close
+                      on_click:
+                        - script.execute: device_overlay_close
+  pages:
+    - id: info_page
+      pad_top: 62
+      pad_bottom: 82
+      pad_left: 12
+      pad_right: 12
+      scroll_dir: VER
+      on_load:
+        - script.execute: device_info_render
+      layout:
+        type: FLEX
+        flex_flow: COLUMN
+        pad_row: 12
+      widgets:
+        - label:
+            text: Display device information
+            text_font: montserrat_28
+        - label:
+            id: info_build_values
+            width: 100%
+            long_mode: WRAP
+            text: '--'
+        - label:
+            id: info_boot_values
+            width: 100%
+            long_mode: WRAP
+            text: '--'
+        - label:
+            id: info_wifi_values
+            width: 100%
+            long_mode: WRAP
+            text: '--'

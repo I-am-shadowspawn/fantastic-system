@@ -60,6 +60,7 @@ packages:
       - esphome/packages/homeassistant.yaml
       - esphome/packages/ui.yaml
       - esphome/packages/heating.yaml
+      - esphome/packages/device_info.yaml
       # Optional, P4 only: enable AFTER C6 recovery; installs remain manual.
       # - esphome/packages/c6-maintenance.yaml
 

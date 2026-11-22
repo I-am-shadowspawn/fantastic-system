@@ -33,6 +33,10 @@ class HomeAssistantFixture:
             device_entities=lambda device: [e for e, s in self.entities.items() if s.get('device') == device],
             states=lambda entity: self.entities.get(entity, {}).get('state', 'unknown'),
             state_attr=lambda entity, attr: self.entities.get(entity, {}).get('attributes', {}).get(attr),
+            area_id=lambda e: self.devices.get(self.entities.get(e, {}).get('device'), {}).get('area'),
+            area_name=lambda e: self.devices.get(self.entities.get(e, {}).get('device'), {}).get('area'),
+            config_entry_id=lambda e: self.devices.get(self.entities.get(e, {}).get('device'), {}).get('hub', 'hub1') if e in self.entities else None,
+            room_battery_entities={},
             is_number=lambda value: self.is_number(value),
             expand=lambda entity: [self.entities[entity]] if entity in self.entities and self.entities[entity].get('present', True) else [],
         )
@@ -120,6 +124,62 @@ class HomeAssistantFixture:
 class DiscoveryTests(unittest.TestCase):
     def setUp(self):
         self.ha = HomeAssistantFixture()
+
+    def battery(self, entity, value, area='Lounge', hub='hub1', model='iTRV'):
+        device = entity + '_device'
+        self.ha.devices[device] = dict(model=model, area=area, hub=hub)
+        self.ha.add(entity, device, state=str(value), device_class='battery', unit_of_measurement='%')
+
+    def test_plain_room_name_preferred_to_entity_label(self):
+        self.ha.room(name='Lounge', friendly_name='Wiser Heater Control Lounge')
+        self.assertEqual(self.ha.snapshot()['cards'][0]['name'], 'Lounge')
+        self.ha.entities['climate.renamed_lounge']['attributes'].pop('name')
+        self.ha.devices['room1']['area'] = 'Living room'
+        self.assertEqual(self.ha.snapshot()['cards'][0]['name'], 'Living room')
+
+    def test_lowest_battery_only_from_heating_devices_in_room_and_hub(self):
+        self.ha.room(name='Lounge')
+        self.ha.devices['room1'].update(area='Lounge', hub='hub1')
+        self.battery('sensor.valve1', 80)
+        self.battery('sensor.valve2', 45)
+        self.battery('sensor.stat', 60, model='RoomStat')
+        self.battery('sensor.other_room', 10, area='Kitchen')
+        self.battery('sensor.other_hub', 5, hub='hub2')
+        self.battery('sensor.smoke_alarm', 1, model='SmokeAlarm')
+        self.assertEqual(self.ha.snapshot()['cards'][0]['battery_percent'], 45)
+
+    def test_malformed_battery_override_does_not_collect_other_rooms(self):
+        self.ha.room(name='Lounge')
+        self.battery('sensor.other_room', 10, area='Kitchen')
+        template = PACKAGE['script']['ha_console_wiser_snapshot']['sequence'][0]['variables']['snapshot']
+        for invalid in ['sensor.other_room', None, {'sensor.other_room': 'bad'}]:
+            with self.subTest(invalid=invalid):
+                snapshot = self.ha.render(template, dict(hot_water_overrides={}, room_battery_entities={'climate.renamed_lounge': invalid}))
+                self.assertIsNone(snapshot['cards'][0]['battery_percent'])
+
+    def test_missing_invalid_and_unavailable_battery(self):
+        self.ha.room(name='Lounge')
+        self.ha.devices['room1']['area'] = 'Lounge'
+        for i, value in enumerate(['unavailable', 'unknown', 'nan', -1, 101]):
+            self.battery(f'sensor.invalid{i}', value)
+        self.assertIsNone(self.ha.snapshot()['cards'][0]['battery_percent'])
+        self.battery('sensor.zero', 0)
+        self.assertEqual(self.ha.snapshot()['cards'][0]['battery_percent'], 0)
+
+    def test_ambiguous_area_needs_explicit_battery_map(self):
+        self.ha.room('climate.one', 'room1', name='Room one')
+        self.ha.room('climate.two', 'room2', name='Room two')
+        for dev in ('room1', 'room2'):
+            self.ha.devices[dev]['area'] = 'Lounge'
+        self.battery('sensor.valve1', 75)
+        self.battery('sensor.other_hub', 1, hub='hub2')
+        self.assertTrue(all(c['battery_percent'] is None for c in self.ha.snapshot()['cards']))
+        template = PACKAGE['script']['ha_console_wiser_snapshot']['sequence'][0]['variables']['snapshot']
+        snapshot = self.ha.render(template, dict(hot_water_overrides={}, room_battery_entities={
+            'climate.one': ['sensor.valve1', 'sensor.other_hub'], 'climate.two': [],
+        }))
+        self.assertEqual(snapshot['cards'][0]['battery_percent'], 75)
+        self.assertIsNone(snapshot['cards'][1]['battery_percent'])
 
     def test_room_counts_and_stable_order(self):
         for count in (0, 1, 6, 7, 13):
