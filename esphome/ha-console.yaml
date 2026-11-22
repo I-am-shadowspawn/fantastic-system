@@ -60,6 +60,8 @@ packages:
       - esphome/packages/homeassistant.yaml
       - esphome/packages/ui.yaml
       - esphome/packages/heating.yaml
+      # Optional, P4 only: enable AFTER C6 recovery; installs remain manual.
+      # - esphome/packages/c6-maintenance.yaml
 
 # Keep connectivity and secrets local: remote packages cannot resolve !secret.
 # This replaces the local packages/base.yaml include.

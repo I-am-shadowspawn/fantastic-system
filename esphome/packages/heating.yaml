@@ -7,6 +7,23 @@ substitutions:
 
 # All UI/state stays in this YAML so remote package users need no local headers.
 globals:
+  - id: heating_ha_clients
+    type: std::vector<std::string>
+  - id: heating_outstanding_requests
+    type: uint8_t
+    initial_value: '0'
+  - id: heating_retry_after
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_render_dirty
+    type: bool
+    initial_value: 'true'
+  - id: heating_snapshot_revision
+    type: uint32_t
+    initial_value: '0'
+  - id: heating_ota_active
+    type: bool
+    initial_value: 'false'
   - id: heating_snapshot
     type: std::string
     initial_value: '""'
@@ -59,61 +76,116 @@ script:
     then:
       - if:
           condition:
-            lambda: return id(heating_fetch_started) == 0 && api::global_api_server->is_connected_with_state_subscription();
+            lambda: |-
+              return id(heating_enabled).state && !id(heating_ota_active) &&
+                     !id(heating_ha_clients).empty() &&
+                     id(heating_fetch_started) == 0 && id(heating_outstanding_requests) < 2 &&
+                     (id(heating_retry_after) == 0 || int32_t(millis() - id(heating_retry_after)) >= 0);
           then:
             - lambda: id(heating_fetch_started) = millis();
             - script.execute:
-                id: heating_fetch
+                id: heating_api_call
+                kind: snapshot
+                action_name: ${heating_snapshot_action}
+                card_id: ''
+                operation: ''
+                temperature: 0
                 request_id: !lambda return int(id(heating_fetch_started));
 
-  - id: heating_fetch
+  # Keep all response-bearing Wiser calls in one native action instantiation.
+  # There may be at most two unanswered requests, including across reconnects:
+  # ESPHome 2026.11 retains native callbacks when replies never arrive.
+  - id: heating_api_call
     mode: parallel
     parameters:
+      kind: string
+      action_name: string
+      card_id: string
+      operation: string
+      temperature: float
       request_id: int
     then:
+      - lambda: |-
+          ++id(heating_outstanding_requests);
+          ESP_LOGD("wiser", "Sending %s request (%u outstanding)", kind.c_str(), unsigned(id(heating_outstanding_requests)));
       - homeassistant.action:
-          action: ${heating_snapshot_action}
+          action: !lambda return action_name;
+          data:
+            card_id: !lambda return card_id;
+            operation: !lambda return operation;
+            temperature: !lambda return temperature;
           capture_response: true
           on_success:
             - lambda: |-
-                if (uint32_t(request_id) != id(heating_fetch_started)) return;
-                id(heating_fetch_started) = 0;
-                auto data = response["response"].as<JsonObjectConst>();
-                if (data["version"].as<int>() != 1 || !data["cards"].is<JsonArrayConst>()) {
-                  id(heating_error) = "Invalid Wiser snapshot";
-                  return;
-                }
-                // Validate before replacing the last usable snapshot.
-                std::vector<std::string> ids;
-                for (auto card : data["cards"].as<JsonArrayConst>()) {
-                  std::string key = card["id"] | "";
-                  std::string kind = card["kind"] | "";
-                  if (key.empty() || (kind != "room" && kind != "hot_water") ||
-                      std::find(ids.begin(), ids.end(), key) != ids.end()) {
-                    id(heating_error) = "Invalid Wiser cards";
+                if (id(heating_outstanding_requests) > 0) --id(heating_outstanding_requests);
+                id(heating_render_dirty) = true;
+                if (kind == "snapshot") {
+                  if (uint32_t(request_id) != id(heating_fetch_started)) return;
+                  id(heating_fetch_started) = 0;
+                  auto data = response["response"].as<JsonObjectConst>();
+                  if (data["version"].as<int>() != 1 || !data["cards"].is<JsonArrayConst>()) {
+                    id(heating_error) = "Invalid Wiser snapshot";
                     return;
                   }
-                  ids.push_back(key);
+                  // Validate before replacing the last usable snapshot.
+                  std::vector<std::string> ids;
+                  for (auto card : data["cards"].as<JsonArrayConst>()) {
+                    std::string key = card["id"] | "";
+                    std::string kind = card["kind"] | "";
+                    if (key.empty() || (kind != "room" && kind != "hot_water") ||
+                        std::find(ids.begin(), ids.end(), key) != ids.end()) {
+                      id(heating_error) = "Invalid Wiser cards";
+                      return;
+                    }
+                    ids.push_back(key);
+                  }
+                  std::string updated;
+                  serializeJson(data, updated);
+                  if (updated != id(heating_snapshot)) {
+                    id(heating_snapshot) = std::move(updated);
+                    ++id(heating_snapshot_revision);
+                  }
+                  id(heating_last_snapshot) = millis();
+                  if (id(heating_waiting_confirmation)) {
+                    id(heating_waiting_confirmation) = false;
+                    id(heating_pending).clear();
+                    id(heating_command_started) = 0;
+                  }
+                  if (id(heating_error) == "Wiser discovery failed - check HA package/permissions" ||
+                      id(heating_error) == "Wiser discovery timed out - retry in 60s" ||
+                      id(heating_error) == "Wiser replies missing - check HA, then restart console" ||
+                      id(heating_error) == "Invalid Wiser snapshot" ||
+                      id(heating_error) == "Invalid Wiser cards") id(heating_error).clear();
+                  id(heating_retry_after) = 0;
+                  ESP_LOGD("wiser", "Snapshot received: %u cards", unsigned(data["cards"].size()));
+                } else {
+                  if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
+                  if (!(response["response"]["ok"] | false)) {
+                    id(heating_error_card) = id(heating_pending);
+                    id(heating_pending).clear();
+                    id(heating_command_started) = 0;
+                    id(heating_error) = "Wiser command was not accepted";
+                  } else {
+                    id(heating_confirm).execute(request_id);
+                  }
                 }
-                id(heating_snapshot).clear();
-                serializeJson(data, id(heating_snapshot));
-                id(heating_last_snapshot) = millis();
-                if (id(heating_waiting_confirmation)) {
-                  id(heating_waiting_confirmation) = false;
+          on_error:
+            - lambda: |-
+                if (id(heating_outstanding_requests) > 0) --id(heating_outstanding_requests);
+                id(heating_render_dirty) = true;
+                ESP_LOGW("wiser", "%s action failed: %s", kind.c_str(), error.c_str());
+                if (kind == "snapshot") {
+                  if (uint32_t(request_id) != id(heating_fetch_started)) return;
+                  id(heating_fetch_started) = 0;
+                  id(heating_retry_after) = millis() + 60000;
+                  id(heating_error) = "Wiser discovery failed - check HA package/permissions";
+                } else {
+                  if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
+                  id(heating_error) = "Wiser command failed - check room and HA logs";
+                  id(heating_error_card) = id(heating_pending);
                   id(heating_pending).clear();
                   id(heating_command_started) = 0;
                 }
-                if (id(heating_error) == "Wiser discovery failed - check HA package/permissions" ||
-                    id(heating_error) == "Wiser discovery timed out" ||
-                    id(heating_error) == "Invalid Wiser snapshot" ||
-                    id(heating_error) == "Invalid Wiser cards") id(heating_error).clear();
-            - script.execute: heating_render
-          on_error:
-            - lambda: |-
-                if (uint32_t(request_id) != id(heating_fetch_started)) return;
-                id(heating_fetch_started) = 0;
-                id(heating_error) = "Wiser discovery failed - check HA package/permissions";
-            - script.execute: heating_render
 
   - id: heating_command
     mode: single
@@ -126,9 +198,10 @@ script:
       - if:
           condition:
             lambda: |-
-              return id(heating_pending).empty() && id(heating_last_snapshot) != 0 &&
-                     uint32_t(millis() - id(heating_last_snapshot)) < 45000 &&
-                     api::global_api_server->is_connected_with_state_subscription();
+              return id(heating_enabled).state && !id(heating_ota_active) &&
+                     !id(heating_ha_clients).empty() && id(heating_outstanding_requests) < 2 &&
+                     id(heating_pending).empty() && id(heating_last_snapshot) != 0 &&
+                     uint32_t(millis() - id(heating_last_snapshot)) < 45000;
           then:
             - lambda: |-
                 id(heating_pending) = card_id;
@@ -136,34 +209,15 @@ script:
                 id(heating_command_started) = millis();
                 id(heating_error).clear();
                 id(heating_error_card).clear();
-            - script.execute: heating_render
-            - homeassistant.action:
-                action: ${heating_command_action}
-                data:
-                  card_id: !lambda return card_id;
-                  operation: !lambda return operation;
-                  temperature: !lambda return temperature;
-                capture_response: true
-                on_success:
-                  - lambda: |-
-                      if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
-                      if (!(response["response"]["ok"] | false)) {
-                        id(heating_error_card) = id(heating_pending);
-                        id(heating_pending).clear();
-                        id(heating_command_started) = 0;
-                        id(heating_error) = "Wiser command was not accepted";
-                      }
-                  - script.execute:
-                      id: heating_confirm
-                      request_id: !lambda return request_id;
-                on_error:
-                  - lambda: |-
-                      if (uint32_t(request_id) != id(heating_command_generation) || id(heating_pending).empty()) return;
-                      id(heating_error) = "Wiser command failed - check room and HA logs";
-                      id(heating_error_card) = id(heating_pending);
-                      id(heating_pending).clear();
-                      id(heating_command_started) = 0;
-                  - script.execute: heating_render
+                id(heating_render_dirty) = true;
+            - script.execute:
+                id: heating_api_call
+                kind: command
+                action_name: ${heating_command_action}
+                card_id: !lambda return card_id;
+                operation: !lambda return operation;
+                temperature: !lambda return temperature;
+                request_id: !lambda return request_id;
 
   # Wait out an older snapshot so only a post-command read releases controls.
   - id: heating_confirm
@@ -206,8 +260,38 @@ script:
           static int32_t col_tracks[columns + 1];
           static int32_t row_tracks[rows + 1];
           static int old_width = 0, old_height = 0;
-          JsonDocument doc;
-          if (deserializeJson(doc, id(heating_snapshot))) {
+          if (id(heating_ota_active) || lv_screen_active() != id(heating_page)->obj) return;
+          const bool connected = !id(heating_ha_clients).empty();
+          const bool fresh_now = connected && id(heating_last_snapshot) != 0 &&
+                                 uint32_t(millis() - id(heating_last_snapshot)) < 45000;
+          static bool previous_fresh = false;
+          static int previous_page = -1;
+          const int current_width = lv_obj_get_content_width(id(heating_viewport));
+          const int current_page = current_width > 0
+              ? (lv_obj_get_scroll_x(id(heating_viewport)) + current_width / 2) / current_width : 0;
+          if (!id(heating_render_dirty) && previous_fresh == fresh_now && previous_page == current_page) return;
+          id(heating_render_dirty) = false;
+          previous_fresh = fresh_now;
+          previous_page = current_page;
+          if (!id(heating_enabled).state) {
+            for (auto *card : cards) {
+              card->editable = card->boostable = card->cancelable = false;
+              lv_obj_add_state(card->target_button, LV_STATE_DISABLED);
+              lv_obj_add_state(card->boost_button, LV_STATE_DISABLED);
+              lv_obj_add_state(card->cancel_button, LV_STATE_DISABLED);
+            }
+            lv_obj_set_hidden(id(heating_dialog), true);
+            lv_label_set_text(id(heating_notice), "Wiser controls disabled in Home Assistant");
+            return;
+          }
+          static JsonDocument doc;
+          static uint32_t parsed_revision = UINT32_MAX;
+          if (parsed_revision != id(heating_snapshot_revision)) {
+            doc.clear();
+            if (!id(heating_snapshot).empty()) deserializeJson(doc, id(heating_snapshot));
+            parsed_revision = id(heating_snapshot_revision);
+          }
+          if (!doc["cards"].is<JsonArrayConst>()) {
             lv_label_set_text(id(heating_notice), id(heating_error).empty()
                 ? "Discovering Wiser devices..." : id(heating_error).c_str());
             return;
@@ -217,7 +301,7 @@ script:
           lv_obj_update_layout(viewport);
           int width = lv_obj_get_content_width(viewport);
           int height = lv_obj_get_content_height(viewport);
-          if (width <= 0 || height <= 0) return;
+          if (width <= 0 || height <= 0) { id(heating_render_dirty) = true; return; }
           std::vector<std::string> keys;
           for (auto item : data) keys.push_back(std::string(item["id"] | "") + ":" + (item["kind"] | ""));
           if (keys != signature || old_width != width || old_height != height) {
@@ -335,10 +419,9 @@ script:
             lv_obj_update_layout(viewport);
             lv_obj_scroll_to_x(viewport, 0, LV_ANIM_OFF);
           }
-          bool fresh = api::global_api_server->is_connected_with_state_subscription() && id(heating_last_snapshot) != 0 &&
+          bool fresh = !id(heating_ha_clients).empty() && id(heating_last_snapshot) != 0 &&
                        uint32_t(millis() - id(heating_last_snapshot)) < 45000;
-          bool enabled = fresh && id(heating_pending).empty() &&
-                         api::global_api_server->is_connected_with_state_subscription();
+          bool enabled = fresh && id(heating_pending).empty() && id(heating_outstanding_requests) < 2;
           auto set_enabled = [](lv_obj_t *widget, bool value) {
             if (value) lv_obj_remove_state(widget, LV_STATE_DISABLED);
             else lv_obj_add_state(widget, LV_STATE_DISABLED);
@@ -395,9 +478,15 @@ interval:
   - interval: 1s
     then:
       - lambda: |-
+          if (id(heating_ota_active)) return;
           if (id(heating_fetch_started) != 0 && uint32_t(millis() - id(heating_fetch_started)) > 15000) {
-                id(heating_fetch_started) = 0;
-            id(heating_error) = "Wiser discovery timed out";
+            id(heating_fetch_started) = 0;
+            id(heating_retry_after) = millis() + 60000;
+            id(heating_error) = id(heating_outstanding_requests) >= 2
+                ? "Wiser replies missing - check HA, then restart console"
+                : "Wiser discovery timed out - retry in 60s";
+            id(heating_render_dirty) = true;
+            ESP_LOGW("wiser", "%s (%u outstanding)", id(heating_error).c_str(), unsigned(id(heating_outstanding_requests)));
           }
           if (id(heating_command_started) != 0 && uint32_t(millis() - id(heating_command_started)) > 15000) {
             id(heating_command_started) = 0;
@@ -405,13 +494,60 @@ interval:
             id(heating_error_card) = id(heating_pending);
             id(heating_pending).clear();
             id(heating_error) = "Wiser command timed out - check HA before retrying";
+            id(heating_render_dirty) = true;
+            ESP_LOGW("wiser", "%s", id(heating_error).c_str());
           }
       - script.execute: heating_render
 
 api:
   on_client_connected:
-    - delay: 2s
+    - lambda: |-
+        // A log viewer also subscribes to entity states. It cannot execute HA
+        // actions, so it must not start discovery on its own.
+        if (client_info.rfind("Home Assistant", 0) == 0) {
+          auto &clients = id(heating_ha_clients);
+          if (std::find(clients.begin(), clients.end(), client_address) == clients.end()) clients.push_back(client_address);
+          id(heating_render_dirty) = true;
+        }
+    - delay: 5s
     - script.execute: heating_refresh
+  on_client_disconnected:
+    - lambda: |-
+        if (client_info.rfind("Home Assistant", 0) == 0) {
+          auto &clients = id(heating_ha_clients);
+          clients.erase(std::remove(clients.begin(), clients.end(), client_address), clients.end());
+          id(heating_render_dirty) = true;
+          // Do not reset outstanding count: the native callbacks still exist.
+        }
+
+switch:
+  - platform: template
+    id: heating_enabled
+    name: Wiser Controls
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - lambda: |-
+          id(heating_render_dirty) = true;
+          id(heating_retry_after) = 0;
+      - script.execute: heating_refresh
+    on_turn_off:
+      - lambda: id(heating_render_dirty) = true;
+
+# ESPHome merges same-port native OTA configurations, preserving the local key.
+ota:
+  - platform: esphome
+    on_begin:
+      - lambda: id(heating_ota_active) = true;
+    on_error:
+      - lambda: |-
+          id(heating_ota_active) = false;
+          id(heating_render_dirty) = true;
+    on_abort:
+      - lambda: |-
+          id(heating_ota_active) = false;
+          id(heating_render_dirty) = true;
 
 lvgl:
   top_layer:
@@ -530,6 +666,7 @@ lvgl:
       pad_right: 12
       scrollable: false
       on_load:
+        - lambda: id(heating_render_dirty) = true;
         - script.execute: heating_refresh
       layout:
         type: FLEX

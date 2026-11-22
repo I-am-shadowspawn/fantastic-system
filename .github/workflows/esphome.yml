@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        hardware: [p4, s3]
+        configuration: [p4, s3, p4-c6, recovery]
     steps:
       - uses: actions/checkout@v4
 
@@ -28,6 +28,10 @@ jobs:
       - name: Test Wiser discovery and commands
         run: python -m unittest discover -s tests -v
 
+      - name: Verify pinned C6 recovery image
+        if: matrix.configuration == 'recovery'
+        run: python tools/verify_c6_image.py
+
       - name: Create CI secrets
         working-directory: esphome
         run: |
@@ -35,10 +39,10 @@ jobs:
             secrets.yaml.example > secrets.yaml
 
       - name: Select checked-out packages
-        run: python tools/local_config.py --hardware ${{ matrix.hardware }}
+        run: python tools/local_config.py --configuration ${{ matrix.configuration }}
 
       - name: Validate configuration
-        run: esphome config esphome/.ci-${{ matrix.hardware }}.yaml
+        run: esphome config esphome/.ci-${{ matrix.configuration }}.yaml
 
       - name: Compile firmware
-        run: esphome compile esphome/.ci-${{ matrix.hardware }}.yaml
+        run: esphome compile esphome/.ci-${{ matrix.configuration }}.yaml

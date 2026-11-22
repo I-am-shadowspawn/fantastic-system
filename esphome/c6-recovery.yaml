@@ -1,0 +1,154 @@
+# Temporary USB-installed recovery for Waveshare ESP32-P4-WIFI6-Touch-LCD-7B.
+# No Wi-Fi, HA connection or secrets are needed. Does not flash automatically.
+# Install this on the P4, press the screen button to update the C6 over SDIO,
+# then USB-install your normal ha-console.yaml again. See esphome/README.md.
+substitutions:
+  name: ha-console-c6-recovery
+  friendly_name: HA Console C6 Recovery
+  # Keep version, URL and SHA256 together when reviewing a host-library upgrade.
+  c6_target_version: '3.1.0'
+
+packages:
+  board:
+    url: https://github.com/I-am-shadowspawn/fantastic-system
+    ref: development
+    refresh: 1min
+    files:
+      - esphome/packages/hardware/waveshare-esp32-p4-wifi6-touch-lcd-7b.yaml
+
+# Recovery application. Keep the 30-second workaround out of normal firmware.
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  project:
+    name: i-am-shadowspawn.ha-console-c6-recovery
+    version: '1.0.0'
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(c6_recovery_update).add_on_state_callback([]() {
+            if (id(c6_recovery_update).state == update::UPDATE_STATE_INSTALLING) {
+              ESP_LOGI("c6_recovery", "C6 installation started. Keep power connected.");
+            }
+          });
+      - script.execute: recovery_refresh
+
+esp32:
+  framework:
+    sdkconfig_options:
+      # ESPHome 2026.11.0's version RPC can block for 5 seconds with old C6
+      # firmware. Allow setup to finish; leave watchdog protection enabled.
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: '30'
+
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+  baud_rate: 115200
+
+update:
+  - platform: esp32_hosted
+    id: c6_recovery_update
+    name: C6 Recovery Firmware
+    type: embedded
+    url: https://esphome.github.io/esp-hosted-firmware/v3.1.0/network_adapter_esp32c6.bin
+    sha256: 4ac31b47eb3bf7e239e657173dcb317433a2cc7799a4ec518aeda9856d06d614
+
+globals:
+  - id: recovery_attempted
+    type: bool
+    initial_value: 'false'
+
+script:
+  - id: recovery_refresh
+    then:
+      - lambda: |-
+          const auto &info = id(c6_recovery_update).update_info;
+          lv_label_set_text_fmt(id(recovery_versions), "C6: %s\nTarget: ${c6_target_version}",
+                               info.current_version.empty() ? "unknown" : info.current_version.c_str());
+          const bool current = info.current_version == "${c6_target_version}";
+          const bool available = id(c6_recovery_update).state == update::UPDATE_STATE_AVAILABLE;
+          if (current) {
+            lv_label_set_text(id(recovery_status), "C6 is up to date.\nUSB-install your normal console firmware.");
+          } else if (!id(recovery_attempted)) {
+            lv_label_set_text(id(recovery_status), available
+                ? "Ready. Press Install to update the C6.\nKeep USB power connected throughout."
+                : "No installable image. Check the USB log.");
+          }
+          if (current || !available || id(recovery_attempted)) {
+            lv_obj_add_state(id(recovery_install_button), LV_STATE_DISABLED);
+          } else {
+            lv_obj_remove_state(id(recovery_install_button), LV_STATE_DISABLED);
+          }
+
+  - id: recovery_install
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(recovery_attempted) &&
+                     id(c6_recovery_update).update_info.current_version != "${c6_target_version}" &&
+                     id(c6_recovery_update).state == update::UPDATE_STATE_AVAILABLE;
+          then:
+            - lambda: |-
+                id(recovery_attempted) = true;
+                lv_obj_add_state(id(recovery_install_button), LV_STATE_DISABLED);
+                lv_label_set_text(id(recovery_status), "Installing C6 firmware...\nKeep USB power connected. See USB log for details.");
+            # Run the blocking firmware operation after the LVGL event returns
+            # and the status text has had a chance to reach the display.
+            - delay: 250ms
+            - update.perform: c6_recovery_update
+            - lambda: |-
+                if (id(c6_recovery_update).status_has_error() ||
+                    id(c6_recovery_update).state != update::UPDATE_STATE_NO_UPDATE) {
+                  ESP_LOGE("c6_recovery", "C6 installation failed. Save the USB log before resetting.");
+                  lv_label_set_text(id(recovery_status), "Update failed. Save the USB log.\nOne attempt per boot; RESET allows another attempt.");
+                } else {
+                  lv_label_set_text(id(recovery_status), "Image written. Restarting to activate...\nVerify the C6 version after reboot.");
+                }
+
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - main_touch
+  buffer_size: 25%
+  bg_color: 0x101418
+  text_color: 0xE0E0E0
+  text_font: montserrat_24
+  pages:
+    - id: recovery_page
+      pad_all: 24
+      scrollable: false
+      layout:
+        type: FLEX
+        flex_flow: COLUMN
+        flex_align_main: SPACE_EVENLY
+        flex_align_cross: CENTER
+      widgets:
+        - label:
+            text: C6 Wi-Fi Firmware Recovery
+            text_font: montserrat_32
+        - label:
+            id: recovery_versions
+            text: Reading C6 version...
+            text_align: CENTER
+        - label:
+            id: recovery_status
+            width: 100%
+            text_align: CENTER
+            text: Preparing recovery...
+        - button:
+            id: recovery_install_button
+            width: 80%
+            height: 100
+            state:
+              disabled: true
+            widgets:
+              - label:
+                  align: CENTER
+                  text: Install C6 Firmware
+                  text_font: montserrat_28
+            on_click:
+              - script.execute: recovery_install

@@ -36,6 +36,17 @@ sensor:
             format: "%.1f°"
             args: [x]
 
+  - platform: debug
+    free:
+      name: Free Heap
+      entity_category: diagnostic
+    block:
+      name: Largest Free Heap Block
+      entity_category: diagnostic
+    loop_time:
+      name: Main Loop Time
+      entity_category: diagnostic
+
 text_sensor:
   - platform: homeassistant
     id: ha_message
@@ -78,3 +89,7 @@ number:
     optimistic: true
     restore_value: true
     initial_value: ${idle_timeout}
+
+# Diagnose long main-loop stalls and heap pressure without verbose per-frame logs.
+debug:
+  update_interval: 60s

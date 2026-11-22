@@ -1,0 +1,15 @@
+# Optional P4-only maintenance. Enable AFTER C6 recovery has restored a stable
+# link. Adds a manual HA update entity, never an automatic installation.
+http_request:
+  id: c6_firmware_http
+  timeout: 10s
+  verify_ssl: true
+
+update:
+  - platform: esp32_hosted
+    id: c6_firmware
+    name: C6 Firmware
+    type: http
+    http_request_id: c6_firmware_http
+    source: https://esphome.github.io/esp-hosted-firmware/manifest/esp32c6.json
+    update_interval: 6h

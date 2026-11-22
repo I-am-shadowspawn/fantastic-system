@@ -108,6 +108,14 @@ update the C6. See the [ESPHome hosted firmware project](https://github.com/esph
 and Waveshare's instructions before changing the C6 firmware; keep a
 compatible C6 image for stock recovery.
 
+For a device reporting an ESP-Hosted major-version mismatch, the supplied
+[`c6-recovery.yaml`](esphome/c6-recovery.yaml) can be USB-installed on the P4 to
+update the C6 over SDIO using a local touchscreen button. It embeds a verified
+3.1.0 image and needs no Wi-Fi. Afterwards, reinstall the normal console and
+optionally enable the manual HA C6 updater. Follow the
+[recovery and maintenance guide](esphome/README.md#recover-the-c6-using-the-p4-usb-connection)
+before flashing; recovery is temporary and never starts an installation automatically.
+
 The GT911 is polled and probes `0x5D` and then `0x14`. Display and touch
 orientation may need adjustment for your mounting.
 
@@ -202,9 +210,10 @@ fresh timestamp, select **Clean Build Files** before installing.
 
 ## CI
 
-`.github/workflows/esphome.yml` tests the Wiser HA templates and validates and
-compiles both hardware variants from the checked-out packages on pushes to
-`main`/`development` and pull requests. It does not build the remote branch.
+`.github/workflows/esphome.yml` tests the HA templates and request lifecycle, verifies
+the C6 recovery image, and compiles normal P4/S3, P4 with C6 maintenance, and
+recovery firmware from the checked-out packages on pushes to `main`/`development`
+and pull requests. It does not build the remote branch.
 
 ### Wiser heating page
 
