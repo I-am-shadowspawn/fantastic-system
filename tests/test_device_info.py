@@ -176,6 +176,7 @@ int main() {
     def test_heating_indicator_transitions_and_battery_boundaries(self):
         render = HEATING_SCRIPTS['heating_render']['then'][0]['lambda']
         body = 'const bool state_known' + render.split('const bool state_known', 1)[1].split('set_enabled(c->target_button', 1)[0]
+        create_label = 'auto label =' + render.split('auto label =', 1)[1].split('const int button_height', 1)[0]
         code = r'''
 #include <cassert>
 #include <cmath>
@@ -191,7 +192,15 @@ struct Field {
   const char *operator|(const char *fallback) const { return is<std::string>() ? std::get<std::string>(value).c_str() : fallback; }
 };
 using Item=std::map<std::string,Field>;
-struct Label { unsigned state=0,color=0; bool hidden=false; std::string text; };
+struct Label { unsigned state=0,color=0,opacity=0; bool hidden=false; std::string text; };
+using lv_obj_t=Label;
+constexpr int LV_OPA_COVER=255,LV_TEXT_ALIGN_CENTER=0,LV_LABEL_LONG_DOT=0;
+int lv_pct(int x) { return x; }
+Label *lv_label_create(Label *) { return new Label{}; }
+void lv_obj_set_width(Label *,int) {}
+void lv_obj_set_style_text_align(Label *,int,int) {}
+void lv_label_set_long_mode(Label *,int) {}
+void lv_obj_set_style_text_opa(Label *label,unsigned value,int) { label->opacity=value; }
 struct Card { Label *boost_button,*flame,*battery_label; };
 constexpr unsigned LV_STATE_CHECKED=1;
 void lv_obj_add_state(Label *o,unsigned state) { o->state|=state; }
@@ -208,29 +217,37 @@ int main() {
             {"boosted",Field{true}}, {"heating",Field{true}}, {"battery_percent",Field{30.0f}}};
   apply(&card,item,true);
   assert(boost.state==LV_STATE_CHECKED && !flame.hidden && !battery.hidden);
-  assert(battery.text.find("30%")!=std::string::npos && battery.color==0xE0E0E0);
+  assert(battery.text.find("30%")!=std::string::npos && battery.color==0x7ED321);
+  // Reproduce a black-text header/footer theme: the actual label factory must
+  // set a readable colour and opacity on the label itself, not just its parent.
+  CREATE_LABEL
+  Label black_parent;
+  auto *title=label(&black_parent); auto *status=label(&black_parent);
+  assert(title->color==0xFFFFFF && title->opacity==LV_OPA_COVER);
+  assert(status->color==0xFFFFFF && status->opacity==LV_OPA_COVER);
+  delete title; delete status;
   item["boosted"].value=false; item["heating"].value=false;
-  float levels[]={0,20,25,26,50,51,75,76,100};
-  const char *glyphs[]={"\uF244","\uF243","\uF243","\uF242","\uF242","\uF241","\uF241","\uF240","\uF240"};
-  for(int i=0;i<9;++i) {
+  float levels[]={0,15,15.5f,16,24,25,25.5f,26,50,51,75,76,100};
+  const char *glyphs[]={"\uF244","\uF243","\uF243","\uF243","\uF243","\uF243","\uF242","\uF242","\uF242","\uF241","\uF241","\uF240","\uF240"};
+  for(int i=0;i<13;++i) {
     item["battery_percent"].value=levels[i]; apply(&card,item,true);
     assert(battery.text.rfind(glyphs[i],0)==0);
-    assert(battery.color==(levels[i]<=20 ? 0xF44336 : 0xE0E0E0));
+    assert(battery.color==(levels[i]<=15 ? 0xFF6B6B : levels[i]<=25 ? 0xFFC107 : 0x7ED321));
     assert(boost.state==0 && flame.hidden);
   }
   item["boosted"].value=true; item["heating"].value=true;
   apply(&card,item,false);
-  assert(boost.state==0 && flame.hidden && battery.text.find("--")!=std::string::npos && battery.color==0x889099);
+  assert(boost.state==0 && flame.hidden && battery.text.find("--")!=std::string::npos && battery.color==0x64B5F6);
   item.erase("battery_percent"); apply(&card,item,true);
-  assert(!battery.hidden && battery.text.find("--")!=std::string::npos);
+  assert(!battery.hidden && battery.text.find("--")!=std::string::npos && battery.color==0x64B5F6);
   item["kind"].value=std::string("hot_water"); apply(&card,item,true); assert(battery.hidden);
   item["kind"].value=std::string("room");
   for(float invalid : {-1.0f,101.0f,NAN}) {
     item["battery_percent"].value=invalid; apply(&card,item,true);
-    assert(battery.text.find("--")!=std::string::npos);
+    assert(battery.text.find("--")!=std::string::npos && battery.color==0x64B5F6);
   }
 }
-'''.replace('BODY', body)
+'''.replace('BODY', body).replace('CREATE_LABEL', create_label)
         with tempfile.TemporaryDirectory(prefix='heating-indicators-') as directory:
             source, binary = Path(directory)/'test.cpp', Path(directory)/'test'
             source.write_text(code)

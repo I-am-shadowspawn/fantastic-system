@@ -282,7 +282,7 @@ script:
               lv_obj_remove_state(card->boost_button, LV_STATE_CHECKED);
               lv_obj_set_hidden(card->flame, true);
               lv_label_set_text(card->battery_label, "\uF244 --");
-              lv_obj_set_style_text_color(card->battery_label, lv_color_hex(0x889099), 0);
+              lv_obj_set_style_text_color(card->battery_label, lv_color_hex(0x64B5F6), 0);
             }
             lv_obj_set_hidden(id(heating_dialog), true);
             lv_label_set_text(id(heating_notice), "Wiser controls disabled in Home Assistant");
@@ -355,6 +355,10 @@ script:
               lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
               auto label = [](lv_obj_t *parent) {
                 auto *obj = lv_label_create(parent);
+                // Header/footer containers carry their own default theme text.
+                // Style labels directly so room names and state remain readable.
+                lv_obj_set_style_text_color(obj, lv_color_hex(0xFFFFFF), 0);
+                lv_obj_set_style_text_opa(obj, LV_OPA_COVER, 0);
                 lv_obj_set_width(obj, lv_pct(100));
                 lv_obj_set_style_text_align(obj, LV_TEXT_ALIGN_CENTER, 0);
                 lv_label_set_long_mode(obj, LV_LABEL_LONG_DOT);
@@ -507,10 +511,10 @@ script:
               const char *glyph = percent <= 0 ? "\uF244" : percent <= 25 ? "\uF243" :
                                   percent <= 50 ? "\uF242" : percent <= 75 ? "\uF241" : "\uF240";
               lv_label_set_text_fmt(c->battery_label, "%s %.0f%%", glyph, percent);
-              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(percent <= 20 ? 0xF44336 : 0xE0E0E0), 0);
+              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(percent <= 15 ? 0xFF6B6B : percent <= 25 ? 0xFFC107 : 0x7ED321), 0);
             } else {
               lv_label_set_text(c->battery_label, "\uF244 --");
-              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(0x889099), 0);
+              lv_obj_set_style_text_color(c->battery_label, lv_color_hex(0x64B5F6), 0);
             }
             set_enabled(c->target_button, c->editable);
             set_enabled(c->boost_button, c->boostable);

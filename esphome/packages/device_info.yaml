@@ -211,6 +211,10 @@ lvgl:
                       widgets:
                         - label:
                             id: device_overlay_values
+                            # Nested objects can apply the default dark theme text.
+                            # Set the detail label explicitly, independently of its parent.
+                            text_color: 0xFFFFFF
+                            text_opa: COVER
                             width: 100%
                             long_mode: WRAP
                             text: '--'

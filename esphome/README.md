@@ -403,10 +403,11 @@ boost indication rather than implying the device is still heating.
 
 The footer shows the lowest valid battery percentage among the room's radiator
 valves (`iTRV`) and thermostat (`RoomStat`), with a five-level battery icon.
-Values at or below 20% are red. Automatic association requires one Wiser room
+Values from 0–15% are red, above 15% through 25% are amber, and above 25%
+are green. Automatic association requires one Wiser room
 per HA area within the same Wiser integration entry/hub. Devices from other
 hubs or non-heating equipment in the same area are excluded. Missing or stale
-room battery information is shown in grey as `--`, not as zero. Hot water cards
+room battery information is shown in blue as `--`, not as zero. Hot water cards
 without battery information omit the icon.
 
 For unusual area assignments or ambiguous rooms, edit `room_battery_entities`
